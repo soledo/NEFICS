@@ -1,6 +1,7 @@
 {
 	"module": "simplepowergrid",
-	"class": "Transmission",
+	"device": "Transmission",
+	"handler": "IEC104DeviceHandler",
 	"guid": 2,
 	"in": [
 		1

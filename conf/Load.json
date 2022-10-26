@@ -1,6 +1,7 @@
 {
 	"module": "simplepowergrid",
-	"class": "Load",
+	"device": "Load",
+	"handler": "IEC104DeviceHandler",
 	"guid": 3,
 	"in": [
 		2
