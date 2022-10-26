@@ -9,31 +9,150 @@ import argparse
 import json
 import sys
 # Mininet imports
-from mininet.cli import CLI
-from mininet.net import Mininet
-from mininet.node import Host, OVSKernelSwitch
+if OS_NAME == 'posix':
+    # POSIX systems
+    from mininet.node import Host, OVSKernelSwitch
+    from mininet.cli import CLI
+    from mininet.net import Mininet
+else:
+    # Win32
+    from cmd import Cmd
 
-CONFIG_DIRECTIVES = [
+    class Controller(object):
+        '''Dummy Controller'''
+
+        def start():
+            pass
+
+    class DefaultController(Controller):
+        '''Dummy DefaultController'''
+    
+    class Host(object):
+        '''Dummy Host'''
+
+    class Intf(object):
+        '''Dummy Intf'''
+
+        def rename(self, name:str):
+            pass
+
+        def setMAC(self, mac:str):
+            pass
+
+        def setIP(self, ip:str):
+            pass
+
+    class Link(object):
+        '''Dummy Link'''
+        def __init__(self):
+            self.intf1 = Intf()
+    
+    class Switch(object):
+        '''Dummy Switch'''
+
+        def attach(self, i:str):
+            pass
+
+        def detach(self, i:str):
+            pass
+
+        def start(self, c:list):
+            pass
+
+    class OVSKernelSwitch(Switch):
+        '''Dummy OVSKernelSwitch'''
+
+    class Mininet(object):
+        '''Dummy Mininet'''
+
+        def __init__( self, topo=None, switch=OVSKernelSwitch, host=Host,
+            controller=DefaultController, link=Link, intf=Intf,
+            build=True, xterms=False, cleanup=False, ipBase='10.0.0.0/8',
+            inNamespace=False,
+            autoSetMacs=False, autoStaticArp=False, autoPinCpus=False,
+            listenPort=None, waitConnected=False ):
+            object.__init__(self)
+        
+        def addController(self, name='c0', controller=None, **params) -> Controller:
+            return Controller()
+        
+        def addSwitch(self, name, cls=None, **params) -> Switch:
+            return OVSKernelSwitch(name)
+        
+        def addHost(self, name, cls=None, **params) -> Host:
+            return Host(name)
+        
+        def addLink(self, node1, node2, port1=None, port2=None, cls=None, **params) -> Link:
+            return Link()
+        
+        def build(self):
+            pass
+
+        def pingAll(self):
+            pass
+        
+        def stop(self):
+            pass
+
+    class CLI(Cmd):
+
+        def __init__(self, mininet: Mininet, stdin=sys.stdin, script=None, **kwargs):
+            self.mn = mininet
+            Cmd.__init__(self, stdin=stdin, **kwargs)
+
+        def do_exit( self, _line ):
+            "Exit"
+            assert self  # satisfy pylint and allow override
+            return 'exited by user command'
+
+        def do_quit( self, line ):
+            "Exit"
+            return self.do_exit( line )
+
+        def do_EOF( self, line ):
+            "Exit"
+            return self.do_exit( line )
+        
+        def default(self, line):
+            print_error('Dummy CLI')
+
+
+# Required directives
+CONFIG_DIRECTIVES_R = [
     'switches',
     'devices'
 ]
 
-DEVICE_DIRECTIVES = [
+DEVICE_DIRECTIVES_R = [
     'interfaces',
-    'iptables',
-    'launcher',
     'name',
-    'routes',
 ]
 
-INTERFACE_DIRECTIVES = [
+INTERFACE_DIRECTIVES_R = [
     'ip',
     'name',
-    'mac',
     'switch'
 ]
 
+LOCALIFACE_DIRECTIVES_R = ['iface', 'switch']
+
+# Optional directives
+CONFIG_DIRECTIVES = CONFIG_DIRECTIVES_R + [
+    'localiface',
+]
+DEVICE_DIRECTIVES = DEVICE_DIRECTIVES_R + [
+    'iptables',
+    'launcher',
+    'routes',
+]
+
+INTERFACE_DIRECTIVES = INTERFACE_DIRECTIVES_R + [
+    'mac',
+]
+
 def print_error(msg: str):
+    if re.match(r'[\r]?\n',msg[-2:]) is None:
+        msg += '\r\n'
     sys.stderr.write(msg)
     sys.stderr.flush()
 
@@ -52,12 +171,122 @@ def new_mac() -> str:
 MAC_REGEX = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
 check_mac = lambda mac: bool(MAC_REGEX.match(mac) is not None) if isinstance(mac, str) else False
 
-def nefics(conf: dict):
-    # Check for mandatory configuration directives
+def check_ipv4(ip: str) -> bool:
     try:
-        assert all(x in conf.keys() for x in CONFIG_DIRECTIVES)
-    except AssertionError:
+        IP_REGEX = re.compile(r'^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$')
+        assert IP_REGEX.match(ip) is not None
+        assert '/' in ip
+        assert int(ip.split('/')[1]) <= 32
+        assert int(ip.split('/')[1]) >= 0
+        ip_address(ip.split('/')[0])
+        return True
+    except (ValueError, AssertionError):
+        return False
+
+def check_configuration(conf: dict) -> bool:
+    # Check for mandatory configuration directives
+    if not all(x in conf.keys() for x in CONFIG_DIRECTIVES):
         print_error(f'Missing configuration directives: {[x for x in CONFIG_DIRECTIVES if x not in conf.keys()]}')
+        return False
+    # Check configured switches
+    if not isinstance(conf['switches'], list):
+        print_error('"switches" directive must be a list of switch configurations.')
+        return False
+    if not all(isinstance(x, dict) for x in conf['switches']):
+        print_error('Switch configurations must be dictionaries.')
+        print_error(f'Offending switches: {[x for x in conf["switches"] if not isinstance(x, dict)]}')
+        return False
+    if not all('name' in x.keys() for x in conf['switches']):
+        for x in conf['switches']:
+            if 'name' not in x.keys():
+                print_error(f'Missing "name" in switch configuration: {x}')
+                break
+        return False
+    if not all(isinstance(x['name'], str) for x in conf['switches']):
+        for x in conf['switches']:
+            if not isinstance(x['name'], str):
+                print_error(f'"name" {x["name"]} is not a string. In: {x}')
+                break
+        return False
+    if not all(isinstance(x['dpid'], int) for x in conf['switches'] if 'dpid' in x.keys()):
+        for x in conf['switches']:
+            if not isinstance(x['dpid'], int):
+                print_error(f'{x["dpid"]} is not an integer')
+                break
+        return False
+    if not len(set([sw['name'] for sw in conf['switches']])) == len(conf['switches']):
+        print_error(f'Duplicate switch names: {[z for z, w in {x["name"]:sum([1 for y in conf["switches"] if y["name"] == x["name"]]) for x in conf["switches"]}.items() if w > 1]}')
+        return False
+    if not len(set([sw['dpid'] for sw in conf['switches'] if 'dpid' in sw.keys()])) == len([sw['dpid'] for sw in conf['switches'] if 'dpid' in sw.keys()]):
+        print_error(f'Duplicate switch dpid: {[z for z, w in {x["dpid"]:sum([1 for y in conf["switches"] if y["dpid"] == x["dpid"]]) for x in conf["switches"]}.items() if w > 1]}')
+        return False
+    # Check configured devices
+    if not isinstance(conf['devices'], list):
+        print_error('"devices" directive must be a list of device configurations.')
+        return False
+    if not all(isinstance(dev, dict) for dev in conf['devices']):
+        print_error('Device configurations must be dictionaries.')
+        print_error(f'Offending devices: {[x for x in conf["devices"] if not isinstance(x, dict)]}')
+        return False
+    if not all(k in DEVICE_DIRECTIVES for dev in conf['devices'] for k in dev.keys()):
+        print_error(f'Unrecognized device directives: {[k for dev in conf["devices"] for k in dev.keys() if k not in DEVICE_DIRECTIVES]}')
+        return False
+    if not len(set([dev['name'] for dev in conf['devices']])) == len(conf['devices']):
+        print_error(f'Duplicate device names: {[z for z, w in {x["name"]:sum([1 for y in conf["devices"] if y["name"] == x["name"]]) for x in conf["devices"]}.items() if w > 1]}')
+        return False
+    if not all(isinstance(i, list) for i in [dev['interfaces'] for dev in conf['devices']]):
+        print_error(f'"Interfaces" directive must be a list of interfaces.')
+        print_error(f"Offending devices: {[dev['name'] for dev in conf['devices'] if not isinstance(dev['interfaces'], list)]}")
+        return False
+    if not all(isinstance(i, dict) for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc):
+        print_error('Interface configurations must be dictionaries.')
+        print_error(f'Offending interfaces: {[i for ifc in [dev["interfaces"] for dev in conf["devices"]] for i in ifc if not isinstance(i, dict)]}')
+        return False
+    if not all(k in INTERFACE_DIRECTIVES for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc for k in i.keys()):
+        print_error(f'Unrecognized interface directives: {[f"{k} in {i}" for ifc in [d["interfaces"] for d in conf["devices"]] for i in ifc for k in i.keys() if k not in INTERFACE_DIRECTIVES]}')
+        return False
+    if not all(k in i.keys() for k in INTERFACE_DIRECTIVES_R for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc):
+        print_error(f'Missing required interface directives: {[f"{k} in {i}" for k in INTERFACE_DIRECTIVES_R for ifc in [d["interfaces"] for d in conf["devices"]] for i in ifc if k not in i.keys()]}')
+        return False
+    if not all(i['switch'] in [sw['name'] for sw in conf['switches']] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc):
+        print_error(f"Specified switch has not been defined: {[i['switch'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc if i['switch'] not in [sw['name'] for sw in conf['switches']]]}")
+        return False
+    if not all(check_ipv4(ip) for ip in set(i['ip'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)):
+        print_error(f"Bad IPv4: {[ip for ip in set(i['ip'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc) if not check_ipv4(ip)]}")
+        return False
+    if not sum([len(set(i['name'] for i in ifc)) for ifc in [dev['interfaces'] for dev in conf['devices']]]) == sum([len([i['name'] for i in ifc]) for ifc in [dev['interfaces'] for dev in conf['devices']]]):
+        print_error(f"Duplicate interface names: { {d['name']:[z for z, w in {x['name']:sum([1 for y in d['interfaces'] if y['name'] == x['name']]) for x in d['interfaces']}.items() if w > 1] for d in conf['devices']}}")
+        return False
+    if not len(set(i['ip'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)) == len([i['ip'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc]):
+        print_error(f"Duplicate IP addresses: {list(set(i['ip'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc))}")
+        return False
+    if not len(set(i['mac'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)) == len([i['mac'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc]):
+        print_error(f"Duplicate MAC addresses: {list(set(i['mac'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc))}")
+        return False
+    # Check for host interface
+    if 'localiface' in conf.keys():
+        if not isinstance(conf['localiface'], dict):
+            print_error('Local interface configuration must be a dictionary.')
+            return False
+        if not all(x in LOCALIFACE_DIRECTIVES_R for x in conf['localiface'].keys()):
+            print_error(f"Unknown local interface directives: {[x for x in conf['localiface'].keys() if x not in LOCALIFACE_DIRECTIVES_R]}")
+            return False
+        if not all(isinstance(x, str) for x in conf['localiface'].values()):
+            print_error(f"Local interface value is not a string: {[x for x in conf['localiface'].values() if not isinstance(x, str)]}")
+            return False
+        if not conf['localiface']['iface'] in interfaces():
+            print_error(f"Cannot find local interface: {conf['localiface']['iface']}")
+            return False
+        if not conf['localiface']['switch'] in [sw['name'] for sw in conf['switches']]:
+            print_error(f"Specified switch has not been defined: {conf['localiface']['switch']}")
+            return False
+    return True
+
+def nefics(conf: dict):
+    # Check configuration
+    try:
+        assert check_configuration(conf)
+    except AssertionError:
         sys.exit()
     # Initialize Mininet
     net = Mininet(topo=None, build=False, autoSetMacs=False)
@@ -65,17 +294,6 @@ def nefics(conf: dict):
     c0 = net.addController(name='c0') # TODO: Add the possibility of using an external controller
     # Setup virtual switches
     switches = dict[str, OVSKernelSwitch]()
-    try:
-        assert isinstance(conf['switches'], list)
-        assert all(isinstance(x, dict) for x in conf['switches'])
-        assert all('name' in x.keys() for x in conf['switches'])
-        assert all(isinstance(x['name'], str) for x in conf['switches'])
-        assert all(isinstance(x['dpid'], int) for x in conf['switches'] if 'dpid' in x.keys())
-        assert len(set([sw['name'] for sw in conf['switches']])) == len(conf['switches']) # Unique switch names
-        assert len(set([sw['dpid'] for sw in conf['switches'] if 'dpid' in sw.keys()])) == len([sw['dpid'] for sw in conf['switches'] if 'dpid' in sw.keys()]) # Unique DPID
-    except AssertionError:
-        print_error(f'Configured value for the "switches" directive is not a valid nefics switch set.\r\n')
-        sys.exit()
     for s in conf['switches']:
         try:
             if 'dpid' in s.keys():
@@ -84,35 +302,16 @@ def nefics(conf: dict):
             else:
                 switches[s['name']] = net.addSwitch(s['name'], dpid=next_dpid(switches), cls=OVSKernelSwitch)
         except AssertionError:
-            print_error(f'Bad switch definition: {str(s)}\r\n')
+            print_error(f'Bad switch definition: {str(s)}')
             sys.exit()
     # Setup virtual devices
     devices:dict[str, Host] = {}
-    try:
-        # Check types
-        assert isinstance(conf['devices'], list)
-        assert all(isinstance(dev, dict) for dev in conf['devices'])
-        assert all(isinstance(i, dict) for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)
-        # Check valid directives
-        assert all(k in DEVICE_DIRECTIVES for dev in conf['devices'] for k in dev.keys())
-        assert all(k in INTERFACE_DIRECTIVES for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc for k in i.keys())
-        # Check required directives
-        assert all(k in i.keys() for k in ['ip', 'name', 'switch'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)
-        assert all(i['switch'] in [sw['name'] for sw in conf['switches']] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)
-        # Check uniqueness, when applicable
-        assert len(set([dev['name'] for dev in conf['devices']])) == len(conf['devices'])
-        assert sum([len(set(i['name'] for i in ifc)) for ifc in [dev['interfaces'] for dev in conf['devices']]]) == sum([len([i['name'] for i in ifc]) for ifc in [dev['interfaces'] for dev in conf['devices']]])
-        assert len(set(i['ip'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)) == len([i['ip'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc])
-        assert len(set(i['mac'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)) == len([i['mac'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc])
-    except AssertionError:
-        print_error(f'Bad definition in "devices" configuration directive\r\n')
-        sys.exit()
     for dev in conf['devices']:
         hname = str(dev['name'])
         dhost = net.addHost(hname, cls=Host)
         devices[hname] = dhost
         for iface in dev['interfaces']:
-            # Check MAC address
+            # Get MAC address
             ifmac = None
             if 'mac' in iface.keys() and check_mac(iface['mac']):
                 ifmac = iface['mac']
@@ -122,35 +321,13 @@ def nefics(conf: dict):
                 ifmac = new_mac()
                 while ifmac.upper() in ['00:00:00:00:00:00', 'FF:FF:FF:FF:FF:FF'] + [str(i['mac']).upper() for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc]:
                     ifmac = new_mac()
-            # Check IP address
-            try:
-                assert '/' in iface['ip']
-                assert int(iface['ip'].split('/')[1]) <= 32
-                assert int(iface['ip'].split('/')[1]) >= 0
-                ip_address(iface['ip'].split('/')[0])
-            except (ValueError, AssertionError):
-                print_error(f'Bad IP address definition: {iface["ip"]}\r\n')
-                sys.exit()
+                print_error(f'Generated MAC address "{ifmac}" for interface {iface["name"]} in host {dev["name"]}.')
             # Create interface
             ln = net.addLink(dhost, switches[iface['switch']])
             niface = ln.intf1
             niface.rename(f'{hname}-{iface["name"]}')
             niface.setMAC(iface['mac'])
-            niface.setIP(iface['ip'])
-    # Check for host interface
-    if 'localiface' in conf.keys():
-        try:
-            assert isinstance(conf['localiface'], dict)
-            assert all(x in ['iface', 'switch'] for x in conf['localiface'].keys())
-            assert all(isinstance(x, str) for x in conf['localiface'].values())
-        except AssertionError:
-            print_error(f'Bad localiface definition: {str(conf["localiface"])}\r\n')
-            sys.exit()
-        try:
-            assert conf['localiface'] in interfaces()
-        except AssertionError:
-            print_error(f'Unknown local interface: "{conf["localiface"]}"\r\n')
-            sys.exit()
+            niface.setIP(iface['ip'])    
     # Start network
     net.build()
     c0.start()
