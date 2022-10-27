@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
 from os import system, environ
-from signal import SIGTERM
 from subprocess import PIPE, Popen
+from time import sleep
 from mininet.net import Mininet
 from mininet.node import Host
 from mininet.node import OVSKernelSwitch
 from mininet.cli import CLI
-from mininet.log import setLogLevel, info
-from mininet.link import Intf
+from mininet.log import info
 from mininet.term import makeTerm
 
 info('*** Initializing ***\n')
@@ -39,8 +38,11 @@ system('sudo ovs-vsctl add-port s1 veth1')
 system('sudo ip addr add 10.0.0.1/24 dev veth0')
 net.pingAll()
 net.terms += makeTerm(hsrc, cmd='python3 -m nefics.launcher -c ./conf/Source.json')
+sleep(0.33)
 net.terms += makeTerm(htx, cmd='python3 -m nefics.launcher -c ./conf/Transmission.json')
+sleep(0.33)
 net.terms += makeTerm(hload, cmd='python3 -m nefics.launcher -c ./conf/Load.json')
+sleep(0.33)
 localxterm = Popen(['xterm', '-display', environ['DISPLAY']], stdout=PIPE, stdin=PIPE)
 CLI(net)
 localxterm.kill()
