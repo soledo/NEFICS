@@ -7,8 +7,8 @@ from PyInquirer.prompts.list import question as listq
 from threading import Thread
 from cmd import Cmd
 from time import sleep
-from helper104 import *
-from IEC104.dissector import APDU, APCI
+from nefics.helper104 import *
+from nefics.IEC104.dissector import APDU, APCI
 
 BUFFER_SIZE = 512
 IEC104_PORT = 2404
