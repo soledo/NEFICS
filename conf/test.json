@@ -13,8 +13,7 @@
 					"name": "eth0",
 					"mac": "68:1f:d8:6a:7f:81",
 					"ip": "10.0.1.11/24",
-					"switch": "s1",
-					"default": true
+					"switch": "s1"
 				}
 			],
 			"launcher": {
@@ -27,7 +26,10 @@
 				"parameters": {
 					"voltage": 526315.79
 				}
-			}
+			},
+			"routes": [
+				["default", "10.0.1.1"]
+			]
 		},
 		{
 			"name": "htx",
@@ -36,8 +38,7 @@
 					"name": "eth0",
 					"mac": "68:1f:d8:de:89:a2",
 					"ip": "10.0.1.12/24",
-					"switch": "s1",
-					"default": true
+					"switch": "s1"
 				}
 			],
 			"launcher": {
@@ -51,7 +52,10 @@
 					"loads": [0.394737, 0.394737, 0.394737],
 					"state": 7
 				}
-			}
+			},
+			"routes": [
+				["default", "10.0.1.1"]
+			]
 		},
 		{
 			"name": "hld",
@@ -60,8 +64,7 @@
 					"name": "eth0",
 					"mac": "68:1f:d8:ac:7e:21",
 					"ip": "10.0.1.13/24",
-					"switch": "s1",
-					"default": true
+					"switch": "s1"
 				}
 			],
 			"launcher": {
@@ -74,7 +77,10 @@
 				"parameters": {
 					"load": 12.5
 				}
-			}
+			},
+			"routes": [
+				["default", "10.0.1.1"]
+			]
 		}
 	]
 }

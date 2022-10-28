@@ -51,8 +51,8 @@ else:
         def __init__(self):
             self.intfs = dict[int,Intf]()
         
-        def setDefaultRoute(self, intf: (Intf | str)):
-            pass
+        def cmd(self, *args, **kwargs) -> (str | None):
+            return None
 
     class Link(object):
         '''Dummy Link'''
@@ -146,8 +146,7 @@ DEVICE_DIRECTIVES_R = [
 INTERFACE_DIRECTIVES_R = [
     'ip',
     'name',
-    'switch',
-    'default'
+    'switch'
 ]
 
 LOCALIFACE_DIRECTIVES_R = ['iface', 'switch']
@@ -359,8 +358,9 @@ def nefics(conf: dict):
         for iface in device.intfs.values():
             iconf = [i for i in dev['interfaces'] if i['name'] == iface.name.split('-')[1]][0]
             iface.setIP(iconf['ip'])
-            if iconf['default'] == True:
-                device.setDefaultRoute(iface)
+        for rt in dev['routes']:
+            if isinstance(rt, list) and len(rt) == 2 and all(isinstance(r, str) for r in rt):
+                device.cmd(f'ip route add {rt[0]} via {rt[1]}')
         if 'launcher' in dev.keys():
             net.terms += makeTerm(devices[dev['name']], cmd=f"python3 -m nefics.launcher -C \"{json.dumps(dev['launcher'])}\"")
             sleep(0.333)
