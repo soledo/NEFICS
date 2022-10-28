@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 
 import re
-from os import name as OS_NAME
-from ipaddress import ip_address
-from netifaces import interfaces
-from Crypto.Random.random import randint
 import argparse
 import json
 import sys
+from os import environ, name as OS_NAME
+from ipaddress import ip_address
+from netifaces import interfaces
+from Crypto.Random.random import randint
+from time import sleep
+from subprocess import PIPE, Popen
 # Mininet imports
 if OS_NAME == 'posix':
     # POSIX systems
     from mininet.node import Host, OVSKernelSwitch
     from mininet.cli import CLI
     from mininet.net import Mininet
+    from mininet.term import makeTerm
 else:
     # Win32
     from cmd import Cmd
@@ -71,6 +74,7 @@ else:
             inNamespace=False,
             autoSetMacs=False, autoStaticArp=False, autoPinCpus=False,
             listenPort=None, waitConnected=False ):
+            self.terms = []
             object.__init__(self)
         
         def addController(self, name='c0', controller=None, **params) -> Controller:
@@ -116,6 +120,8 @@ else:
         def default(self, line):
             print_error('Dummy CLI')
 
+    def makeTerm(node, title='Node', term='xterm', display=None, cmd='bash') -> (list | None):
+        return []
 
 # Required directives
 CONFIG_DIRECTIVES_R = [
@@ -337,7 +343,14 @@ def nefics(conf: dict):
         switches[conf['localiface']['switch']].attach(conf['localiface']['iface'])
     net.pingAll()
     # Launch instances
+    for dev in conf['devices']:
+        if 'launcher' in dev.keys():
+            net.terms += makeTerm(devices[dev['name']], cmd=f"python3 -m nefics.launcher -C \"{json.dumps(dev['launcher'])}\"")
+            sleep(0.333)
+    localxterm = Popen(['xterm', '-display', environ['DISPLAY']], stdout=PIPE, stdin=PIPE)
     CLI(net)
+    localxterm.kill()
+    localxterm.wait()
     if 'localiface' in conf.keys():
         switches[conf['localiface']['switch']].detach(conf['localiface']['iface'])
     net.stop()

@@ -7,26 +7,71 @@
 	],
 	"devices": [
 		{
-			"name": "h1",
+			"name": "hsrc",
 			"interfaces": [
 				{
 					"name": "eth0",
 					"mac": "68:1f:d8:6a:7f:81",
-					"ip": "10.0.1.20/24",
+					"ip": "10.0.1.11/24",
 					"switch": "s1"
 				}
-			]
+			],
+			"launcher": {
+				"module": "simplepowergrid",
+				"device": "Source",
+				"handler": "IEC104DeviceHandler",
+				"guid": 1,
+				"in": [],
+				"out": [2],
+				"parameters": {
+					"voltage": 526315.79
+				}
+			}
 		},
 		{
-			"name": "h2",
+			"name": "htx",
 			"interfaces": [
 				{
 					"name": "eth0",
 					"mac": "68:1f:d8:de:89:a2",
-					"ip": "10.0.1.23/24",
+					"ip": "10.0.1.12/24",
 					"switch": "s1"
 				}
-			]
+			],
+			"launcher": {
+				"module": "simplepowergrid",
+				"device": "Transmission",
+				"handler": "IEC104DeviceHandler",
+				"guid": 2,
+				"in": [1],
+				"out": [3],
+				"parameters": {
+					"loads": [0.394737, 0.394737, 0.394737],
+					"state": 7
+				}
+			}
+		},
+		{
+			"name": "hld",
+			"interfaces": [
+				{
+					"name": "eth0",
+					"mac": "68:1f:d8:ac:7e:21",
+					"ip": "10.0.1.13/24",
+					"switch": "s1"
+				}
+			],
+			"launcher": {
+				"module": "simplepowergrid",
+				"device": "Load",
+				"handler": "IEC104DeviceHandler",
+				"guid": 3,
+				"in": [2],
+				"out": [],
+				"parameters": {
+					"load": 12.5
+				}
+			}
 		}
 	]
 }

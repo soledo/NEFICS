@@ -186,11 +186,11 @@ class SCADACLI(Cmd):
                 status = int(self.__rtu_data[rtuaddr]['ioas'][ioa]) >> 1
                 print(f"{self.__rtu_data[rtuaddr]['ioas']} {status}")
                 if status == 0:
-                    print('The last known state is CLOSED')
-                    ans = runprompt(listq(message='Would you like to OPEN this IOA?', choices=['Yes', 'No']))
+                    print('The last known state is OFF')
+                    ans = runprompt(listq(message='Would you like to change this IOA to ON?', choices=['Yes', 'No']))
                 else:
-                    print('The last known state is OPEN')
-                    ans = runprompt(listq(message='Would you like to CLOSE this IOA?', choices=['Yes', 'No']))
+                    print('The last known state is ON')
+                    ans = runprompt(listq(message='Would you like to change this IOA to OFF?', choices=['Yes', 'No']))
                 if ans == 'Yes':
                     status = 1 if status > 0 else 2
                     self.__rtu_data[rtuaddr]['tx'] += 1
@@ -238,7 +238,7 @@ class SCADACLI(Cmd):
                 if IOAS[k][0] is not 'Breaker':
                     print('Value: {0:5.12f} {1:s}'.format(value, IOAS[k][1]))
                 else:
-                    value = 'CLOSED' if value == 0 else 'OPEN'
+                    value = 'OFF' if value == 0 else 'ON'
                     print('Value: %s' % value)
             print('='*40 + '\r\n')
         else:

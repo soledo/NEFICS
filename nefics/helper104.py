@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
+from datetime import datetime
 from nefics.IEC104.dissector import ASDU, APCI, APDU
 from nefics.IEC104.ioa import *
-from datetime import datetime
 
 APDULEN = {
     3: 14,
