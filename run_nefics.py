@@ -146,6 +146,7 @@ LOCALIFACE_DIRECTIVES_R = ['iface', 'switch']
 CONFIG_DIRECTIVES = CONFIG_DIRECTIVES_R + [
     'localiface',
 ]
+
 DEVICE_DIRECTIVES = DEVICE_DIRECTIVES_R + [
     'iptables',
     'launcher',
@@ -191,8 +192,8 @@ def check_ipv4(ip: str) -> bool:
 
 def check_configuration(conf: dict) -> bool:
     # Check for mandatory configuration directives
-    if not all(x in conf.keys() for x in CONFIG_DIRECTIVES):
-        print_error(f'Missing configuration directives: {[x for x in CONFIG_DIRECTIVES if x not in conf.keys()]}')
+    if not all(x in conf.keys() for x in CONFIG_DIRECTIVES_R):
+        print_error(f'Missing configuration directives: {[x for x in CONFIG_DIRECTIVES_R if x not in conf.keys()]}')
         return False
     # Check configured switches
     if not isinstance(conf['switches'], list):
