@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
-from nefics.IEC104.const import DPI_ENUM
 import sys
 from netaddr import valid_ipv4
 from types import FrameType
 from socket import AF_INET, IPPROTO_TCP, SOCK_STREAM, socket, timeout
 
 # NEFICS imports
+from nefics.IEC104.const import DPI_ENUM
 from nefics.IEC104.dissector import APDU, APCI
 
 IEC104_PORT = 2404

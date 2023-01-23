@@ -36,9 +36,63 @@ IEC104_T1 = 15
 IEC104_PORT = 2404
 IEC104_BUFFER_SIZE = 65536 # 64K
 
+def cp56time() -> CP56Time:
+    now = datetime.now()
+    ms = now.second*1000 + int(now.microsecond/1000)
+    minu = now.minute
+    iv = 0
+    hour = now.hour
+    su = 0
+    day = now.day
+    dow = now.today().weekday() + 1
+    month = now.month
+    year = now.year - 2000
+    output = CP56Time(MS = ms, Min = minu, IV = iv, Hour = hour, SU = su, Day = day, DOW = dow, Month = month, Year = year)
+    return output
+
+class IEC104Device(devicebase.IEDBase):
+
+    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+        self._tx = 0    # IEC104 Transmission counter
+        self._rx = 0    # IEC104 Reception counter
+    
+    @property
+    def rx(self) -> int:
+        return self._rx
+    
+    @rx.setter
+    def rx(self, value: int):
+        self._rx = 0 if value < 0 or value > 0xffff else value
+    
+    @property
+    def tx(self) -> int:
+        return self._tx
+    
+    @tx.setter
+    def tx(self, value: int):
+        self._tx = 0 if value < 0 or value > 0xffff else value
+
+    def poll_values_IEC104(self) -> list:
+        '''
+        Override this method to return the appropriate values of
+        IEC104 according to the device's functionality.
+
+        This method must return a list comprised of
+        nefics.IEC104.APDU objects.
+        '''
+        return []
+    
+    def handle_IEC104_IFrame(self, packet: APDU) -> APDU:
+        '''
+        Override this method to return the appropriate APDU for the
+        received I-Frame according to the device's functionality.
+        '''
+        return None
+
 class IEC104DeviceHandler(Thread):
 
-    def __init__(self, device: devicebase.IEDBase):
+    def __init__(self, device: IEC104Device):
         super().__init__()
         self._terminate = False
         self._device = device
@@ -175,7 +229,7 @@ class IEC104DeviceHandler(Thread):
         self._device.join()
         listening_sock.close()
 
-class Source(devicebase.IEDBase):
+class Source(IEC104Device):
     '''
     Source device.
 
@@ -219,8 +273,8 @@ class Source(devicebase.IEDBase):
                     )
                 self._sock.sendto(pkt.build(), addr)
     
-    def poll_values_IEC104(self):
-        ioa = IOA36(IOA=BASE_IOA, Value=self._voltage, QDS=0, CP56Time=devicebase.cp56time())
+    def poll_values_IEC104(self) -> list:
+        ioa = IOA36(IOA=BASE_IOA, Value=self._voltage, QDS=0, CP56Time=cp56time())
         pkt = APDU()
         pkt /= APCI(ApduLen=25, Type=0x00, Tx=self.tx, Rx=self.rx)
         pkt /= ASDU(TypeId=36, SQ=0, NumIx=1, CauseTx=3, Test=0, OA=0, Addr=self.guid, IOA=[ioa])
@@ -374,14 +428,14 @@ class Transmission(devicebase.IEDBase):
         iframes = []
         if all(x is not None for x in [self._vin, self._amp] + self._loads):
             # Input voltage
-            ioa = IOA36(IOA=BASE_IOA, Value=self._vin, QDS=0, CP56Time=devicebase.cp56time())
+            ioa = IOA36(IOA=BASE_IOA, Value=self._vin, QDS=0, CP56Time=cp56time())
             pkt = APDU()
             pkt /= APCI(ApduLen=25, Type=0x00, Tx=self.tx, Rx=self.rx)
             pkt /= ASDU(TypeId=36, SQ=0, NumIx=1, CauseTx=3, Test=0, OA=0, Addr=self.guid, IOA=[ioa])
             self.tx += 1
             iframes.append(pkt)
             # Measured current
-            ioa = IOA36(IOA=BASE_IOA + 1, Value=self._amp, QDS=0, CP56Time=devicebase.cp56time())
+            ioa = IOA36(IOA=BASE_IOA + 1, Value=self._amp, QDS=0, CP56Time=cp56time())
             pkt = APDU()
             pkt /= APCI(ApduLen=25, Type=0x00, Tx=self.tx, Rx=self.rx)
             pkt /= ASDU(TypeId=36, SQ=0, NumIx=1, CauseTx=3, Test=0, OA=0, Addr=self.guid, IOA=[ioa])
@@ -540,14 +594,14 @@ class Load(devicebase.IEDBase):
         iframes = []
         if all(x is not None for x in [self._vin, self._amp]):
             # Input voltage
-            ioa = IOA36(IOA=BASE_IOA, Value=self._vin, QDS=0, CP56Time=devicebase.cp56time())
+            ioa = IOA36(IOA=BASE_IOA, Value=self._vin, QDS=0, CP56Time=cp56time())
             pkt = APDU()
             pkt /= APCI(ApduLen=25, Type=0x00, Tx=self.tx, Rx=self.rx)
             pkt /= ASDU(TypeId=36, SQ=0, NumIx=1, CauseTx=3, Test=0, OA=0, Addr=self.guid, IOA=[ioa])
             self.tx += 1
             iframes.append(pkt)
             # Measured current
-            ioa = IOA36(IOA=BASE_IOA + 1, Value=self._amp, QDS=0, CP56Time=devicebase.cp56time())
+            ioa = IOA36(IOA=BASE_IOA + 1, Value=self._amp, QDS=0, CP56Time=cp56time())
             pkt = APDU()
             pkt /= APCI(ApduLen=25, Type=0x00, Tx=self.tx, Rx=self.rx)
             pkt /= ASDU(TypeId=36, SQ=0, NumIx=1, CauseTx=3, Test=0, OA=0, Addr=self.guid, IOA=[ioa])
