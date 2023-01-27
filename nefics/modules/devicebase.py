@@ -2,6 +2,8 @@
 
 import sys
 import io
+from signal import SIGINT, SIGTERM
+from types import FrameType
 from netifaces import gateways, ifaddresses
 from netaddr import valid_ipv4, IPNetwork
 from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, SO_REUSEADDR, SO_BROADCAST, SOL_SOCKET, timeout
@@ -231,3 +233,39 @@ class IEDBase(Thread):
         identify.join()
         msghandler.join()
 
+class DeviceHandler(Thread):
+
+    def __init__(self, device: IEDBase):
+        super.__init__()
+        self._device = device
+        self._terminate = False
+    
+    @property
+    def terminate(self) -> bool:
+        return self._terminate
+    
+    @terminate.setter
+    def terminate(self, value: bool):
+        self._terminate = value
+    
+    def status(self):
+        '''Override this method!'''
+        print('Override this method!')
+    
+    def set_terminate(self, signum: int, stack_frame: FrameType):
+        if signum in [SIGINT, SIGTERM]:
+            self._device.terminate = True
+            self._terminate = True
+            sys.stderr.write(f'Received a termination signal. Terminating threads ...\r\n')
+            sys.stderr.flush()
+        else:
+            sys.stderr.write(f'Signal handler recevied an unsupported signal: {signum}\r\n')
+            sys.stderr.flush()
+    
+    def run(self):
+        self._device.start()
+        while not self._terminate:
+            # Dummy loop
+            # Place here the handling of any incoming ICS protocol connection
+            sleep(1)
+        self._device.join()

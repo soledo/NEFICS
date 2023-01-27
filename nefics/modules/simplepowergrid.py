@@ -15,13 +15,10 @@ and an output neighbor, to which the output voltage is supplied..
 The consumer load has one transmission substation as its input.
 '''
 
-import signal
 from socket import AF_INET, IPPROTO_TCP, SOCK_STREAM, socket, timeout
-import sys
 from threading import Thread
 from time import sleep
 from datetime import datetime
-from types import FrameType
 from Crypto.Random.random import randint
 
 # NEFICS imports
@@ -90,7 +87,7 @@ class IEC104Device(devicebase.IEDBase):
         '''
         return None
 
-class IEC104DeviceHandler(Thread):
+class IEC104DeviceHandler(devicebase.DeviceHandler):
 
     def __init__(self, device: IEC104Device):
         super().__init__()
@@ -116,20 +113,8 @@ class IEC104DeviceHandler(Thread):
     def terminate(self, value: bool):
         self._terminate = value
     
-    def set_terminate(self, signum: int, stack_frame: FrameType):
-        if signum in [signal.SIGINT, signal.SIGTERM]:
-            self._device.terminate = True
-            self._terminate = True
-            sys.stderr.write(f'Received a termination signal. Terminating threads ...\r\n')
-            sys.stderr.flush()
-        else:
-            sys.stderr.write(f'Signal handler recevied an unsupported signal: {signum}\r\n')
-            sys.stderr.flush()
-    
     def status(self):
-        stat = '\r\n\r\n'
-        stat += str(self)
-        print(stat)
+        print(f'\r\n\r\n{str(self)}')
 
     def _data_transfer(self, isock:socket, connid: int):
         '''
@@ -294,7 +279,7 @@ class Source(IEC104Device):
         response['ASDU'].CauseTx = 45 # Unknown CoT
         return response
 
-class Transmission(devicebase.IEDBase):
+class Transmission(IEC104Device):
     '''
     Transmission substation device.
 
@@ -508,7 +493,7 @@ class Transmission(devicebase.IEDBase):
             response['ASDU'].CauseTx = 45 # Unknown CoT
         return response
 
-class Load(devicebase.IEDBase):
+class Load(IEC104Device):
     '''
     Load device.
 

@@ -6,7 +6,7 @@ import signal
 from time import sleep
 from threading import Thread
 
-from nefics.modules.devicebase import IEDBase
+from nefics.modules.devicebase import IEDBase, DeviceHandler
 
 def launcher_main():
     from importlib import import_module
@@ -78,7 +78,7 @@ def launcher_main():
         sys.exit()
     handler = handler_class(device)
     try:
-        assert isinstance(handler, Thread)
+        assert isinstance(handler, DeviceHandler)
     except AssertionError:
         sys.stderr.write(f'Instantiated handler ({handler.__name__}) is not supported by NEFICS\r\n')
         sys.stderr.flush()
