@@ -236,7 +236,7 @@ class IEDBase(Thread):
 class DeviceHandler(Thread):
 
     def __init__(self, device: IEDBase):
-        super.__init__()
+        super().__init__()
         self._device = device
         self._terminate = False
     
