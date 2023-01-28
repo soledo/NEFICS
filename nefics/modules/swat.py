@@ -5,6 +5,7 @@
 # security research.
 
 from dataclasses import dataclass, astuple
+from typing import Union
 from enum import Enum
 from netaddr import valid_ipv4
 from socket import AF_INET, IPPROTO_TCP, SOCK_STREAM, socket, timeout
@@ -387,7 +388,7 @@ class PLCDevice(IEDBase):
         except AssertionError:
             return False
 
-    def _set_memory_value(self, tag:str, value: int | bool):
+    def _set_memory_value(self, tag:str, value: Union[int, bool]):
         # Internal method for setting values in the memory map
         assert tag in PHYS_MODBUS.keys()
         datamap, address = PHYS_MODBUS[tag]
@@ -407,7 +408,7 @@ class PLCDevice(IEDBase):
             assert value in range(65536)
             self._ir_map[address] = value
 
-    def _get_memory_value(self, tag:str) -> int | bool:
+    def _get_memory_value(self, tag:str) -> Union[int, bool]:
         # Internal method for getting values from the memory map
         assert tag in PHYS_MODBUS.keys()
         datamap, address = PHYS_MODBUS[tag]
