@@ -156,10 +156,14 @@ class SWaTProcessDevice(IEDBase):
         assert SWAT_IDS[guid] == 'PHYS' # This is the physical process simulation
         assert 'plc' in kwargs.keys()
         assert isinstance(kwargs['plc'], dict)
-        assert all(isinstance(x, int) for x in kwargs['plc'].keys())
+        assert all(isinstance(x, str) for x in kwargs['plc'].keys())
         assert all(isinstance(x, str) for x in kwargs['plc'].values())
         assert all(valid_ipv4(x) for x in kwargs['plc'].values())
-        self._plc_ip = kwargs['plc'] # A dictionary containing the IP addresses of the PLCs indexed by the GUID of the device. See SWAT_IDS ^^^
+        # A dictionary containing the IP addresses of the PLCs indexed by the GUID of the device. See SWAT_IDS ^^^
+        self._plc_ip = dict[int, str]()
+        pplc:dict[str, str] = kwargs['plc']
+        for k in pplc.keys():
+            self._plc_ip[int(k)] = pplc[k]
         # Initial simulation values
         self._status = PhysicalStatus(
             mv101 = False,                  # OFF
@@ -269,10 +273,15 @@ class SWaTProcessHandler(DeviceHandler):
         print(stat)
     
 class ModbusDatamap(Enum):
+    
     DI=1
     CO=2
     IR=3
     HR=4
+
+    def __str__(self):
+        STR_MAP = {1: 'Discrete Input', 2: 'Coil', 3: 'Input Register', 4: 'Holding Register'}
+        return STR_MAP[self._value_]
 
 PDU_REQ_MAPPING = {
     ModbusDatamap.CO: ModbusPDU01ReadCoilsRequest,
@@ -312,6 +321,16 @@ class PLCDevice(IEDBase):
         self._co_map = dict[int, bool]()
         self._ir_map = dict[int, int]()
         self._hr_map = dict[int, int]()
+
+    def __str__(self):
+        output = '=' * 40 + '\r\n'
+        for k in PHYS_MODBUS.keys():
+            dmap, addr = PHYS_MODBUS[k]
+            if self.check_addr(dmap, addr, 1):
+                value = self._get_memory_value(k)
+                output += f'{k:6s}: [{str(dmap):16s}@0x{addr:04x}] = {value}\r\n'
+        output += '=' * 40 + '\r\n'
+        return output
 
     # Physical process I/O
     def _request_value(self, id: int):
@@ -414,6 +433,15 @@ class PLCHandler(DeviceHandler):
         super().__init__(device)
         self._device = device
         self._connections = list[Thread]()
+
+    def status(self):
+        stat = (
+            f'### SWaT PLC Handler\r\n'
+            f' ## Class: {self._device.__class__.__name__}\r\n'
+            f'  # Status at: {datetime.now().ctime()}\r\n\r\n'
+            f'{str(self._device)}'
+        )
+        print(stat)
 
     def _modbus_loop(self, sock: socket):
         connection_alive = True
@@ -811,7 +839,7 @@ class PLC2(PLCDevice):
         # Request FIT201 and PH201 from the physical process
         self._query_values()
         # Control logic
-        ph201 = self._get_memory_value('PH201')
+        ph201 = float(self._get_memory_value('PH201')) / 10000.0 # Value from short int to float
         if ph201 >= PH_201_M['HH'] or ph201 >= PH_201_M['H']:
             self._set_memory_value('P201', False)
         if ph201 <= PH_201_M['LL'] or ph201 <= PH_201_M['L']:
@@ -856,7 +884,7 @@ class PLC3(PLCDevice):
         # Request LIT301
         self._query_values()
         # Control logic
-        lit301 = self._get_memory_value('LIT301')
+        lit301 = float(self._get_memory_value('LIT301')) / 10000.0 # Value from short int to float
         if lit301 >= LIT_301_M['HH'] or lit301 >= LIT_301_M['H']:
             self._set_memory_value('P301', False)
         if lit301 <= LIT_301_M['LL'] or lit301 <= LIT_301_M['L']:
