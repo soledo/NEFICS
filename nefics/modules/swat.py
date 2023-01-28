@@ -12,6 +12,7 @@ from threading import Thread
 from datetime import datetime
 from time import sleep
 from math import ceil
+from random import randint
 from scapy.contrib.modbus import * # MODBUS TCP
 # NEFICS imports
 import nefics.simproto as simproto
@@ -29,6 +30,8 @@ simproto.MESSAGE_ID_MAP[0xFFFFFFFD] = 'MSG_DND'
 # Integer arg0 -> Variable identifier
 # (Integer arg1 / Float arg0) -> values (boolean / float)
 # e.g.: 0300000004000000070000000200000001000000000000000000 -> [PLC3|PHYS|MSG_SET|P301|ON|-|-]
+
+# General device GUIDs
 SWAT_IDS = {
     'PLC1': 1,
     'PLC2': 2,
@@ -40,6 +43,7 @@ SWAT_IDS = {
     4: 'PHYS',
 }
 
+# Physical status variable mapping
 PHYS_IDS = {
     'MV101': 0,
     'P101': 1,
@@ -162,8 +166,8 @@ class SWaTProcessDevice(IEDBase):
             p101 = True,                    # ON
             p201 = False,                   # OFF
             p301 = False,                   # OFF
-            lit101 = 500.0,                 # [mm]
-            lit301 = 500.0,                 # [mm]
+            lit101 = 0.500,                 # [m]
+            lit301 = 0.500,                 # [m]
             fit101 = 0.0,                   # [m^3/h]
             fit201 = PUMP_FLOWRATE_OUT,     # [m^3/h]
             ph201 = 0.7                     # pH
@@ -174,7 +178,7 @@ class SWaTProcessDevice(IEDBase):
 
     def simulate(self):
         # Tank T101 (PLC1)
-        t101 = self._status.lit101 / 1000.0 # Current tank level [m]
+        t101 = self._status.lit101 # Current tank level [m]
         water_volume = t101 * TANK_SECTION
         water_volume += (PUMP_FLOWRATE_IN * PROCESS_TIMEOUT_H) if self._status.mv101 else 0.0
         self._status.fit101 = PUMP_FLOWRATE_IN if self._status.mv101 else 0.0
@@ -182,19 +186,19 @@ class SWaTProcessDevice(IEDBase):
         self._status.fit201 = PUMP_FLOWRATE_OUT if self._status.p101 else 0.0
         t101 = water_volume / TANK_SECTION
         t101 = 0.0 if t101 <= 0.0 else t101
-        self._status.lit101 = t101 * 1000.0 # Updated level [mm]
+        self._status.lit101 = t101 # Updated level [m]
 
         # pH changes (PLC2)
         self._status.ph201 += PH_PUMP_FLOWRATE_IN * PH_PERIOD_HOURS if self._status.p201 else (-1.0 * (PH_PUMP_FLOWRATE_OUT * PH_PERIOD_HOURS))
         
         # Tank T301 (PLC3)
-        t301 = self._status.lit301 / 1000.0 # Current tank level [m]
+        t301 = self._status.lit301 # Current tank level [m]
         water_volume = t301 * TANK_SECTION
         water_volume += (PUMP_FLOWRATE_OUT * PROCESS_TIMEOUT_H) if self._status.p101 else 0.0
         water_volume =- (PUMP_FLOWRATE_OUT * PROCESS_TIMEOUT_H) if self._status.p301 else 0.0
         t301 = water_volume / TANK_SECTION
         t301 = 0.0 if t301 <= 0.0 else t301
-        self._status.lit301 = t301 * 1000.0 # Updated level [mm]
+        self._status.lit301 = t301 # Updated level [mm]
 
         sleep(PROCESS_TIMEOUT_S)
 
@@ -270,6 +274,26 @@ class ModbusDatamap(Enum):
     IR=3
     HR=4
 
+PDU_REQ_MAPPING = {
+    ModbusDatamap.CO: ModbusPDU01ReadCoilsRequest,
+    ModbusDatamap.DI: ModbusPDU02ReadDiscreteInputsRequest,
+    ModbusDatamap.HR: ModbusPDU03ReadHoldingRegistersRequest,
+    ModbusDatamap.IR: ModbusPDU04ReadInputRegistersRequest
+}
+
+# Memory mappings for MODBUS
+PHYS_MODBUS = {
+    'MV101' : (ModbusDatamap.CO, 0x0101),
+    'P101'  : (ModbusDatamap.CO, 0x1101),
+    'P201'  : (ModbusDatamap.CO, 0x1201),
+    'P301'  : (ModbusDatamap.CO, 0x1301),
+    'LIT101': (ModbusDatamap.IR, 0x0101),
+    'LIT301': (ModbusDatamap.IR, 0x0301),
+    'FIT101': (ModbusDatamap.IR, 0x1101),
+    'FIT201': (ModbusDatamap.IR, 0x1201),
+    'PH201' : (ModbusDatamap.IR, 0x2201),
+}
+
 class PLCDevice(IEDBase):
     
     def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
@@ -343,6 +367,46 @@ class PLCDevice(IEDBase):
             return True
         except AssertionError:
             return False
+
+    def _set_memory_value(self, tag:str, value: int | bool):
+        # Internal method for setting values in the memory map
+        assert tag in PHYS_MODBUS.keys()
+        datamap, address = PHYS_MODBUS[tag]
+        assert address in range(65536)
+        if datamap == ModbusDatamap.CO:
+            assert isinstance(value, bool)
+            self._co_map[address] = value
+        elif datamap == ModbusDatamap.DI:
+            assert isinstance(value, bool)
+            self._di_map[address] = value
+        elif datamap == ModbusDatamap.HR:
+            assert isinstance(value, int)
+            assert value in range(65536)
+            self._hr_map[address] = value
+        else:
+            assert isinstance(value, int)
+            assert value in range(65536)
+            self._ir_map[address] = value
+
+    def _get_memory_value(self, tag:str) -> int | bool:
+        # Internal method for getting values from the memory map
+        assert tag in PHYS_MODBUS.keys()
+        datamap, address = PHYS_MODBUS[tag]
+        assert address in range(65536)
+        if datamap == ModbusDatamap.CO:
+            return self._co_map[address]
+        elif datamap == ModbusDatamap.DI:
+            return self._di_map[address]
+        elif datamap == ModbusDatamap.HR:
+            return self._hr_map[address]
+        else:
+            return self._ir_map[address]
+
+    def _build_mb_request_single(tag:str) -> ModbusADURequest:
+        request = ModbusADURequest(transId=randint(1,65535))
+        dmap, address = PHYS_MODBUS[tag]
+        request /= PDU_REQ_MAPPING[dmap](startAddr=address, quantity=1)
+        return request
 
 class PLCHandler(DeviceHandler):
 
@@ -641,3 +705,162 @@ class PLC1(PLCDevice):
         assert isinstance(kwargs['p3addr'], str)
         assert valid_ipv4(kwargs['p3addr'])
         self._plc3_ip = kwargs['p3addr']
+        # Memory mappings
+        self._set_memory_value('MV101', False)
+        self._set_memory_value('P101', True)
+        self._set_memory_value('LIT101', 5000) # 0.5 * 1000. The register holds 2 bytes as a short int (0-65535)
+        self._set_memory_value('FIT101', 0)
+        # PLC3 socket
+        self._p3 = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        self._p3.connect((self._plc3_ip, 502)) # MODBUS
+        self._p3.settimeout(1)
+    
+    def _query_values(self):
+        # From physical process
+        request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_GET'])
+        request.IntegerArg0 = PHYS_IDS['LIT101']
+        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        sleep(0.1)
+        request.IntegerArg0 = PHYS_IDS['FIT101']
+        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        sleep(0.1)
+    
+    def _update_values(self):
+        # To physical process
+        request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'])
+        request.IntegerArg0 = PHYS_IDS['MV101']
+        request.IntegerArg1 = int(self._get_memory_value('MV101'))
+        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        sleep(0.1)
+        request.IntegerArg0 = PHYS_IDS['P101']
+        request.IntegerArg1 = int(self._get_memory_value('P101'))
+        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+    
+    def handle_specific(self, message: simproto.NEFICSMSG):
+        if message.SenderID == SWAT_IDS['PHYS'] and message.ReceiverID == self.guid and message.MessageID == simproto.MESSAGE_ID['MSG_VAL']:
+            # PLC1 should only receive values from 'LIT101' and 'FIT101'
+            phys_id = message.IntegerArg0
+            if phys_id in [PHYS_IDS['LIT101'], PHYS_IDS['FIT101']]:
+                value = message.FloatArg0
+                self._set_memory_value(PHYS_IDS[phys_id], int(value * 10000.0)) # Float to short int
+    
+    def simulate(self):
+        # Request FIT101 and LIT101 from the physical process
+        self._query_values()
+        # Request LIT301 value from PLC3
+        request = self._build_mb_request_single('LIT301')
+        self._p3.send(request.build())
+        data = self._p3.recv(1024)
+        if len(data):
+            response = ModbusADUResponse(data)
+        # Control logic
+        lit101 = float(self._get_memory_value('LIT101')) / 10000.0 # Value from short int to float
+        if lit101 >= LIT_101_M['HH'] or lit101 >= LIT_101_M['H']:
+            self._set_memory_value('MV101', False)
+        if lit101 <= LIT_101_M['L'] or lit101 <= LIT_101_M['LL']:
+            self._set_memory_value('MV101', True)
+        if len(data) and 'registerVal' in response.payload.fields: # Modbus PDU response with register value (holding/input)
+            lit301 = float(response.payload.registerVal[0]) / 10000.0  # Value from short int to float
+            if lit301 >= LIT_301_M['HH'] or lit301 >= LIT_301_M['H']:
+                self._set_memory_value('P101', False)
+            if lit301 <= LIT_301_M['L'] or lit301 <= LIT_301_M['LL']:
+                self._set_memory_value('P101', True)
+        elif 'exceptCode' in response.payload.fields: # Modbus Exception
+            self._log('MODBUS Exception while requesing LIT301 value')
+        # Commit changes to physical process
+        self._update_values()
+        sleep(PROCESS_TIMEOUT_S)
+
+class PLC2(PLCDevice):
+
+    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+        assert guid == SWAT_IDS['PLC2']
+        # Memory mappings
+        self._set_memory_value('FIT201', int(PUMP_FLOWRATE_OUT * 10000.0))  # Float to short int
+        self._set_memory_value('PH201', 7000)                               # Float to short int
+        self._set_memory_value('P201', False)
+    
+    def _query_values(self):
+        # From physical process
+        request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_GET'])
+        request.IntegerArg0 = PHYS_IDS['FIT201']
+        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        sleep(0.1)
+        request.IntegerArg0 = PHYS_IDS['PH201']
+        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        sleep(0.1)
+    
+    def _update_values(self):
+        # To physical process
+        request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'])
+        request.IntegerArg0 = PHYS_IDS['P201']
+        request.IntegerArg1 = int(self._get_memory_value('P201'))
+        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        sleep(0.1)
+    
+    def handle_specific(self, message: simproto.NEFICSMSG):
+        if message.SenderID == SWAT_IDS['PHYS'] and message.ReceiverID == self.guid and message.MessageID == simproto.MESSAGE_ID['MSG_VAL']:
+            # PLC2 should only receive values from 'FIT201' and 'PH201'
+            phys_id = message.IntegerArg0
+            if phys_id in [PHYS_IDS['FIT201'], PHYS_IDS['PH201']]:
+                value = message.FloatArg0
+                self._set_memory_value(PHYS_IDS[phys_id], int(value * 10000.0)) # Float to short int
+    
+    def simulate(self):
+        # Request FIT201 and PH201 from the physical process
+        self._query_values()
+        # Control logic
+        ph201 = self._get_memory_value('PH201')
+        if ph201 >= PH_201_M['HH'] or ph201 >= PH_201_M['H']:
+            self._set_memory_value('P201', False)
+        if ph201 <= PH_201_M['LL'] or ph201 <= PH_201_M['L']:
+            self._set_memory_value('P201', True)
+        # Commit changes to physical process
+        self._update_values()
+        sleep(PROCESS_TIMEOUT_S)
+
+class PLC3(PLCDevice):
+
+    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+        assert guid == SWAT_IDS['PLC3']
+        # Memory mappings
+        self._set_memory_value('LIT301', 5000)
+        self._set_memory_value('P301', False)
+    
+    def _query_values(self):
+        # From physical process
+        request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_GET'])
+        request.IntegerArg0 = PHYS_IDS['LIT301']
+        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        sleep(0.1)
+    
+    def _update_values(self):
+        # To physical process
+        request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'])
+        request.IntegerArg0 = PHYS_IDS['P301']
+        request.IntegerArg1 = int(self._get_memory_value('P301'))
+        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        sleep(0.1)
+    
+    def handle_specific(self, message: simproto.NEFICSMSG):
+        if message.SenderID == SWAT_IDS['PHYS'] and message.ReceiverID == self.guid and message.MessageID == simproto.MESSAGE_ID['MSG_VAL']:
+            # PLC3 should only receive values from 'LIT301'
+            phys_id = message.IntegerArg0
+            if phys_id == PHYS_IDS['LIT301']:
+                value = message.FloatArg0
+                self._set_memory_value('LIT301', int(value * 10000.0)) # Float to short int
+    
+    def simulate(self):
+        # Request LIT301
+        self._query_values()
+        # Control logic
+        lit301 = self._get_memory_value('LIT301')
+        if lit301 >= LIT_301_M['HH'] or lit301 >= LIT_301_M['H']:
+            self._set_memory_value('P301', False)
+        if lit301 <= LIT_301_M['LL'] or lit301 <= LIT_301_M['L']:
+            self._set_memory_value('P301', True)
+        # Commit changes to physical process
+        self._update_values()
+        sleep(PROCESS_TIMEOUT_S)
