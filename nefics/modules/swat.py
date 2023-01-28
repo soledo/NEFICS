@@ -128,8 +128,8 @@ class PhysicalStatus(object):
     p101:   bool  = False  # Pump 101 status (ON/OFF)
     p201:   bool  = False  # Pump 201 [Chemical dispenser] (ON/OFF)
     p301:   bool  = False  # Pump 301 status (ON/OFF)
-    lit101: float = 0.0    # Level indicator 101 [mm]
-    lit301: float = 0.0    # Level indicator 301 [mm]
+    lit101: float = 0.0    # Level indicator 101 [m]
+    lit301: float = 0.0    # Level indicator 301 [m]
     fit101: float = 0.0    # Flow level indicator 101 [m^3/h]
     fit201: float = 0.0    # Flow level indicator 201 [m^3/h]
     ph201:  float = 0.0    # pH level indicator
@@ -141,11 +141,11 @@ class PhysicalStatus(object):
             f'  P101: {"   [ON]" if self.p101   else "  [OFF]"}\r\n'
             f'  P201: {"   [ON]" if self.p201   else "  [OFF]"}\r\n'
             f'  P301: {"   [ON]" if self.p301   else "  [OFF]"}\r\n'
-            f'LIT101: {self.lit101:7.2f}\r\n'
-            f'LIT301: {self.lit301:7.2f}\r\n'
-            f'FIT101: {self.fit101:7.2f}\r\n'
-            f'FIT201: {self.fit201:7.2f}\r\n'
-            f' PH201: {self.ph201:7.2f}\r\n'
+            f'LIT101: {self.lit101:2.7f}\r\n'
+            f'LIT301: {self.lit301:2.7f}\r\n'
+            f'FIT101: {self.fit101:2.7f}\r\n'
+            f'FIT201: {self.fit201:2.7f}\r\n'
+            f' PH201: {self.ph201:2.7f}\r\n'
             f'{"=" * 15}\r\n'
         )
         return output
