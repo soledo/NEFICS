@@ -257,7 +257,7 @@ class SWaTProcessDevice(IEDBase):
                 pkt.MessageID = simproto.MESSAGE_ID['MSG_DND']
             # If necessary, send response packet
             if pkt is not None:
-                self._sock.sendto(pkt.build(), (addr, simproto.SIM_PORT))
+                self._sock.sendto(pkt.build(), addr)
 
 class SWaTProcessHandler(DeviceHandler):
 
@@ -337,14 +337,14 @@ class PLCDevice(IEDBase):
     def _request_value(self, id: int):
         assert id in PHYS_IDS.keys()
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_GET'], IntegerArg0=id)
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
     
     def _set_value(self, id: int, value: int):
         assert id in PHYS_IDS.keys()
         idstr = PHYS_IDS[id]
         assert idstr in ['MV101', 'P101', 'P201', 'P301']
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'], IntegerArg0=id, IntegerArg1=value)
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
 
     # MODBUS I/O
     def read_bool(self, dmap: ModbusDatamap, address: int) -> bool:
@@ -748,10 +748,10 @@ class PLC1(PLCDevice):
         # From physical process
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_GET'])
         request.IntegerArg0 = PHYS_IDS['LIT101']
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
         request.IntegerArg0 = PHYS_IDS['FIT101']
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
     
     def _update_values(self):
@@ -759,11 +759,11 @@ class PLC1(PLCDevice):
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'])
         request.IntegerArg0 = PHYS_IDS['MV101']
         request.IntegerArg1 = int(self._get_memory_value('MV101'))
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
         request.IntegerArg0 = PHYS_IDS['P101']
         request.IntegerArg1 = int(self._get_memory_value('P101'))
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
     
     def handle_specific(self, message: simproto.NEFICSMSG):
         if message.SenderID == SWAT_IDS['PHYS'] and message.ReceiverID == self.guid and message.MessageID == simproto.MESSAGE_ID['MSG_VAL']:
@@ -814,10 +814,10 @@ class PLC2(PLCDevice):
         # From physical process
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_GET'])
         request.IntegerArg0 = PHYS_IDS['FIT201']
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
         request.IntegerArg0 = PHYS_IDS['PH201']
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
     
     def _update_values(self):
@@ -825,7 +825,7 @@ class PLC2(PLCDevice):
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'])
         request.IntegerArg0 = PHYS_IDS['P201']
         request.IntegerArg1 = int(self._get_memory_value('P201'))
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
     
     def handle_specific(self, message: simproto.NEFICSMSG):
@@ -862,7 +862,7 @@ class PLC3(PLCDevice):
         # From physical process
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_GET'])
         request.IntegerArg0 = PHYS_IDS['LIT301']
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
     
     def _update_values(self):
@@ -870,7 +870,7 @@ class PLC3(PLCDevice):
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'])
         request.IntegerArg0 = PHYS_IDS['P301']
         request.IntegerArg1 = int(self._get_memory_value('P301'))
-        self._sock.sendto(request.build(), (self._phys_addr, simproto.SIM_PORT))
+        self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
     
     def handle_specific(self, message: simproto.NEFICSMSG):
