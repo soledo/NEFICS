@@ -200,7 +200,7 @@ class SWaTProcessDevice(IEDBase):
         t301 = self._status.lit301 # Current tank level [m]
         water_volume = t301 * TANK_SECTION
         water_volume += (PUMP_FLOWRATE_OUT * PROCESS_TIMEOUT_H) if self._status.p101 else 0.0
-        water_volume =- (PUMP_FLOWRATE_OUT * PROCESS_TIMEOUT_H) if self._status.p301 else 0.0
+        water_volume -= (PUMP_FLOWRATE_OUT * PROCESS_TIMEOUT_H) if self._status.p301 else 0.0
         t301 = water_volume / TANK_SECTION
         t301 = 0.0 if t301 <= 0.0 else t301
         self._status.lit301 = t301 # Updated level [mm]
@@ -257,7 +257,7 @@ class SWaTProcessDevice(IEDBase):
                 pkt.MessageID = simproto.MESSAGE_ID['MSG_DND']
             # If necessary, send response packet
             if pkt is not None:
-                self._sock.sendto(pkt.build(), addr)
+                self._sock.sendto(pkt.build(), (addr, simproto.SIM_PORT))
 
 class SWaTProcessHandler(DeviceHandler):
 
@@ -887,9 +887,9 @@ class PLC3(PLCDevice):
         # Control logic
         lit301 = float(self._get_memory_value('LIT301')) / 10000.0 # Value from short int to float
         if lit301 >= LIT_301_M['HH'] or lit301 >= LIT_301_M['H']:
-            self._set_memory_value('P301', False)
-        if lit301 <= LIT_301_M['LL'] or lit301 <= LIT_301_M['L']:
             self._set_memory_value('P301', True)
+        if lit301 <= LIT_301_M['LL'] or lit301 <= LIT_301_M['L']:
+            self._set_memory_value('P301', False)
         # Commit changes to physical process
         self._update_values()
         sleep(PROCESS_TIMEOUT_S)
