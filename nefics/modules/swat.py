@@ -422,7 +422,7 @@ class PLCDevice(IEDBase):
         else:
             return self._ir_map[address]
 
-    def _build_mb_request_single(tag:str) -> ModbusADURequest:
+    def _build_mb_request_single(self, tag:str) -> ModbusADURequest:
         request = ModbusADURequest(transId=randint(1,65535))
         dmap, address = PHYS_MODBUS[tag]
         request /= PDU_REQ_MAPPING[dmap](startAddr=address, quantity=1)
