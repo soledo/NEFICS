@@ -236,7 +236,7 @@ class SWaTProcessDevice(IEDBase):
             if mid == simproto.MESSAGE_ID['MSG_GET'] and request in allowed_get:
                 pkt.IntegerArg0 = request
                 pkt.MessageID = simproto.MESSAGE_ID['MSG_VAL']
-                value = astuple(self._status)[request]
+                value = astuple(self._status)[PHYS_IDS[request]]
                 value = value if isinstance(value, float) else int(value)
                 if isinstance(value, int):
                     pkt.IntegerArg1 = value
