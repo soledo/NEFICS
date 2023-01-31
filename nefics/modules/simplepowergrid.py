@@ -90,7 +90,7 @@ class IEC104Device(devicebase.IEDBase):
 class IEC104DeviceHandler(devicebase.DeviceHandler):
 
     def __init__(self, device: IEC104Device):
-        super().__init__()
+        super().__init__(device)
         self._terminate = False
         self._device = device
         self._connections = []
