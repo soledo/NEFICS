@@ -167,7 +167,7 @@ class IEC104DeviceHandler(devicebase.DeviceHandler):
                             apdu = self._device.handle_IEC104_IFrame(data)
                         elif frame_type == 0x01:
                             # S-Frame
-                            self._device.tx = data['APCI'].Rx
+                            self._device.tx = (data['APCI'].Rx - 1)
                             apdu = None
                         else:
                             # U-Frame
@@ -446,8 +446,8 @@ class Transmission(IEC104Device):
         if asdu.TypeId == 45:
             # Type 45: C_SC_NA_1 (Single command) -- 60870-5-101 IEC:2003 Section 7.3.2.1
             ioa:IOA45 = asdu['IOA45']
-            self.tx = apci.Tx + 1
-            self.rx = apci.Rx + 1
+            self.tx = apci.Rx + 1
+            self.rx = apci.Tx
             response = APDU()
             response /= APCI(ApduLen=14, Type=0x00, Tx=self.tx, Rx=self.rx)
             if self._wait_exec is None and ioa.SCO.SE == 1 and asdu.CauseTx == 6:
