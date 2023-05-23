@@ -1,0 +1,32 @@
+{
+    "switches": [
+        {"name": "s1", "dpid": 1},
+        {"name": "s2", "dpid": 2}
+    ],
+    "devices": [
+        {
+            "name": "honeypot",
+            "interfaces": [
+                {"name": "eth0", "ip": "192.168.0.250/24", "switch": "s1"},
+                {"name": "eth1", "ip": "10.0.0.250/24", "switch": "s2"}
+            ],
+            "launcher": {
+                "module": "honeypot",
+                "device": "HoneyDevice",
+                "handler": "HoneyHandler",
+                "guid": 1, "in": [], "out": [],
+                "parameters": {
+                    "honeyconf": "conf/honeypot.conf"
+                }
+            },
+            "routes": [["default", "192.168.0.1"]]
+        },
+        {
+            "name": "scanner",
+            "interfaces": [
+                {"name": "eth0", "ip": "192.168.0.251/24", "switch": "s1"}
+            ],
+            "routes": [["default", "192.168.0.1"]]
+        }
+    ]
+}

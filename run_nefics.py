@@ -276,7 +276,7 @@ def check_configuration(conf: dict) -> bool:
     if not len(set(i['ip'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)) == len([i['ip'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc]):
         print_error(f"Duplicate IP addresses: {list(set(i['ip'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc))}")
         return False
-    if not len(set(i['mac'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)) == len([i['mac'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc]):
+    if all('mac' in dict(i).keys() for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc) and not len(set(i['mac'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc)) == len([i['mac'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc]):
         print_error(f"Duplicate MAC addresses: {list(set(i['mac'] for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc))}")
         return False
     # Check for host interface
@@ -335,14 +335,14 @@ def nefics(conf: dict):
                 print_error(f'Bad MAC address: {iface["mac"]}. Generating random MAC address for this interface ...\r\n')
             if ifmac is None:
                 ifmac = new_mac()
-                while ifmac.upper() in ['00:00:00:00:00:00', 'FF:FF:FF:FF:FF:FF'] + [str(i['mac']).upper() for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc]:
+                while ifmac.upper() in ['00:00:00:00:00:00', 'FF:FF:FF:FF:FF:FF'] + [str(i['mac']).upper() if 'mac' in dict(i).keys() else '' for ifc in [dev['interfaces'] for dev in conf['devices']] for i in ifc]:
                     ifmac = new_mac()
                 print_error(f'Generated MAC address "{ifmac}" for interface {iface["name"]} in host {dev["name"]}.')
             # Create interface
             ln = net.addLink(dhost, switches[iface['switch']])
             niface = ln.intf1
             niface.rename(f'{hname}-{iface["name"]}')
-            niface.setMAC(iface['mac'])
+            niface.setMAC(ifmac)
             niface.setIP(iface['ip'])    
     # Start network
     net.build()
