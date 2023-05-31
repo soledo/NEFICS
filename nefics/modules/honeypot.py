@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+# Standard imports
 import subprocess
 import os
 from time import sleep
 from datetime import datetime
-from nefics.modules.devicebase import IEDBase, DeviceHandler
+# NEFICS imports
+from nefics.modules.devicebase import IEDBase, DeviceHandler, ProtocolListener, LOG_PRIO
+from nefics.protos import http, modbus
 
 class HoneyDevice(IEDBase):
     # Will only hold the honeyd configuration
@@ -58,3 +61,85 @@ class HoneyHandler(DeviceHandler):
             sleep(5)
         self._process.terminate()
         self._process.wait(20)
+
+class PLCDevice(IEDBase):
+
+    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+        self._html : str = kwargs['html'] if 'html' in kwargs.keys() and isinstance(kwargs['html'], str) else None
+        self._httpsrv = kwargs['httpsrv'] if 'httpsrv' in kwargs.keys() and isinstance(kwargs['httpsrv'], str) else None
+        self._protocols = kwargs['protos'] if 'protos' in kwargs.keys() and isinstance(kwargs['protos'], list) and all(isinstance(x, str) for x in kwargs['protos']) else None
+    
+    @property
+    def httpsrv_header(self) -> str:
+        return self._httpsrv if self._httpsrv is not None else 'NEFICS/1.0'
+    
+    @property
+    def html_path(self) -> str:
+        return self._html if self._html is not None else ''
+    
+    @property
+    def protocols(self) -> list[str]:
+        return self._protocols
+
+class PLCHandler(DeviceHandler):
+
+    def __init__(self, device: PLCDevice):
+        super().__init__(device)
+        self._device : PLCDevice = device
+        self._protocols : dict[str, ProtocolListener] = dict()
+
+    def status(self):
+        stat = (
+            f'### Honeypot PLC Handler\r\n'
+            f' ## Class: {self._device.__class__.__name__}\r\n'
+            f'  # Status at: {datetime.now().ctime()}\r\n\r\n'
+            f'{str(self._device)}\r\n\r\n'
+            f'  # Protocol listeners:\r\n'
+        )
+        for p in self._protocols.keys():
+            stat += f'    {p.upper()}: {"LISTENING" if self._protocols[p].is_alive() else "DOWN"}\r\n'
+        print(stat)
+
+    def _start_http(self):
+        try:
+            http_args : dict[str,str] = {}
+            http_args['server_header'] = self._device.httpsrv_header
+            hpath = self._device.html_path
+            assert len(hpath)
+            assert os.path.exists(hpath)
+            assert os.path.isdir(hpath)
+            http_args['static_dir'] = hpath
+            listener : ProtocolListener = http.HTTPListener(**http_args)
+            self._protocols['http'] = listener
+            listener.start()
+        except AssertionError:
+            self._device.log(message='Could not instantiate HTTP server.', prio=LOG_PRIO['WARNING'])
+
+    def _start_modbus(self):
+        listener : ProtocolListener = modbus.ModbusListener(device=self._device)
+        self._protocols['modbus'] = listener
+        listener.start()
+
+    def run(self):
+        self._device.start()
+        if self._device.protocols is not None:
+            phandlers : dict[str, function]= {
+                'http' : self._start_http,
+                'modbus' : self._start_modbus
+            }
+            for p in self._device.protocols:
+                if p.lower() in phandlers.keys():
+                    phandlers[p]()
+                else:
+                    self._device.log(message=f'Unknown protocol: {p}', prio=LOG_PRIO['WARNING'])
+        while not self._terminate:
+            # Dummy loop
+            sleep(1)
+        while any(thr.is_alive() for thr in self._protocols.values()):
+            for thr in self._protocols.values():
+                if thr.is_alive():
+                    thr.terminate = True
+                    thr.join(1)
+        self._device.join()
+        

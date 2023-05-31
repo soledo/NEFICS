@@ -7,11 +7,12 @@ import sys
 def main():
     aparser = argparse.ArgumentParser()
     aparser.add_argument('ip')
+    aparser.add_argument('num_scans')
     args = aparser.parse_args()
     ip_addr = str(args.ip)
+    scans = int(args.num_scans)
     nm = nmap3.Nmap()
     results = []
-    scans = 10
     for i in range(scans):
         sys.stdout.write(f'\rScan {i+1}/{scans}')
         sys.stdout.flush()

@@ -11,6 +11,7 @@ from threading import Thread
 from collections import deque
 from datetime import datetime
 from time import sleep
+from struct import pack, unpack
 
 if sys.platform not in ['win32']:
     from socket import SO_REUSEPORT
@@ -64,17 +65,35 @@ class IEDBase(Thread):
         super().__init__()
         self._guid = guid
         self._terminate = False
-        self._n_in_addr = {n: None for n in neighbors_in}                       # IDs of neighbors this device depends on
-        self._n_out_addr = {n: None for n in neighbors_out}                     # IDs of neighbors depending on this device
-        self._sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)                   # Use UDP
+        self._memory : dict[int, int] = dict()                                          # Device Memory Emulation
+        self._n_in_addr = {n: None for n in neighbors_in}                               # IDs of neighbors this device depends on
+        self._n_out_addr = {n: None for n in neighbors_out}                             # IDs of neighbors depending on this device
+        self._sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)                           # Use UDP
         if sys.platform not in ['win32']:
-            self._sock.setsockopt(SOL_SOCKET, SO_REUSEPORT, 1)                  # Enable port reusage (unix systems)
-        self._sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)                      # Enable address reuse
-        self._sock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)                      # Enable broadcast
-        self._sock.bind(('', simproto.SIM_PORT))                                # Bind to simulation port on all addresses
-        self._sock.settimeout(0.333)                                            # Set socket timeout (seconds)
-        self._msgqueue = deque(maxlen=simproto.QUEUE_SIZE//simproto.DATA_LEN)   # Simulation message queue (64KB)
-        if 'log' in kwargs.keys() and isinstance(kwargs['log'], io.TextIOBase):
+            self._sock.setsockopt(SOL_SOCKET, SO_REUSEPORT, 1)                          # Enable port reusage (unix systems)
+        self._sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)                              # Enable address reuse
+        self._sock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)                              # Enable broadcast
+        self._sock.bind(('', simproto.SIM_PORT))                                        # Bind to simulation port on all addresses
+        self._sock.settimeout(0.333)                                                    # Set socket timeout (seconds)
+        self._msgqueue = deque(maxlen=simproto.QUEUE_SIZE//simproto.DATA_LEN)           # Simulation message queue (64KB)
+        self._mem_wr_queue : deque[tuple[function, int, int | bool | float]] = deque()  # Device memory write request queue
+        device_identification_values = ['vname', 'pcode', 'rev', 'dname', 'model']
+        if 'info' in kwargs.keys() and isinstance(kwargs['info'], dict) and all(isinstance(y, str) for x in kwargs['info'].items() for y in x) and all(str(x).lower() in device_identification_values for x in kwargs['info'].keys()):
+            # Custom device identification information
+            device_info : dict[str,str] = kwargs['info']
+            self._vendor_name = device_info['vname']
+            self._product_code = device_info['pcode']
+            self._revision = device_info['rev']
+            self._device_name = device_info['dname']
+            self._device_model = device_info['model']
+        else:
+            # Default device identification information
+            self._vendor_name = 'NEFICS'
+            self._product_code = 'PC 01'
+            self._revision = 'V0.1'
+            self._device_name = 'eDevice'
+            self._device_model = 'EMULATED-01'
+        if 'log' in kwargs.keys() and isinstance(kwargs['log'], io.TextIOBase):         # Check for log file
             self._logfile = kwargs['log']
         else:
             self._logfile = None
@@ -105,6 +124,101 @@ class IEDBase(Thread):
     def logfile(self, value: io.TextIOBase):
         self._logfile = value
 
+    @property
+    def device_id(self) -> dict[int, str]:
+        # Based on Modbus Device Identification
+        dev_id = {
+            0x00: self._vendor_name,
+            0x01: self._product_code,
+            0x02: self._revision,
+            0x04: self._device_name,
+            0x05: self._device_model
+        }
+        return dev_id
+
+    # Memory I/O
+    def check_addr(self, offset : int, start_address : int, amount : int) -> bool:
+        '''Checks whether the specified memory address range contains any values. Only memory locations with a defined key in the memory map contain values in the simulated device.'''
+        return start_address <= 0xFFFF and start_address >= 0x0000 and amount >= 1 and amount <= 0xfffe and all(x in self._memory.keys() for x in range(offset + start_address, amount))
+
+    def read_bool(self, address: int) -> bool:
+        '''Read a boolean representation of the stored byte'''
+        assert address <= 0x3FFFF and address >= 0x00000
+        assert address in self._memory.keys()
+        assert self._memory[address] in [0x0, 0x1]
+        return True if self._memory[address] == 0x1 else False
+    
+    def read_word(self, address: int) -> int:
+        '''Read a Little-Endian WORD representation of the stored value in [address, address + 1] bytes'''
+        assert address <= 0x3FFFF and address >= 0x00000
+        assert all(a in self._memory.keys() for a in [address, address + 1])
+        return int(unpack('<H', bytes([self._memory[address], self._memory[address + 1]]))[0])
+    
+    def read_ieee_float(self, address : int) -> float:
+        '''Read an IEEE 754 half-precision 16-bit float representation of the stored value in [address, address + 1] bytes'''
+        assert address <= 0x3FFFF and address >= 0x00000
+        assert all(a in self._memory.keys() for a in [address, address + 1])
+        return unpack('<e', bytes([self._memory[address], self._memory[address + 1]]))[0]
+    
+    def _write_bool(self, address : int, value: bool):
+        '''Write a boolean representation of the stored byte'''
+        assert address <= 0x3FFFF and address >= 0x00000
+        assert address in self._memory.keys()
+        self._memory[address] = 0x1 if value else 0x0
+    
+    def write_bool(self, address : int, value : bool):
+        '''Queue a write request for a boolean value in a given address'''
+        assert address <= 0x3FFFF and address >= 0x00000
+        assert all(a in self._memory.keys() for a in [address, address + 1])
+        self._mem_wr_queue.append((self._write_bool, address, value))
+    
+    def _write_word(self, address : int, value: int):
+        '''Write a Little-Endian WORD representation of the stored value in [address, address + 1] bytes'''
+        assert address <= 0x3FFFF and address >= 0x00000
+        assert value >= 0x0000 and value <= 0xFFFF
+        assert all(a in self._memory.keys() for a in [address, address + 1])
+        raw : bytes = pack('<H', value)
+        self._memory[address] = raw[0]
+        self._memory[address + 1] = raw[1]
+    
+    def write_word(self, address : int, value : int):
+        '''Queue a write request for a 16-bit WORD value in a given address'''
+        assert address <= 0x3FFFF and address >= 0x00000
+        assert value >= 0x0000 and value <= 0xFFFF
+        assert all(a in self._memory.keys() for a in [address, address + 1])
+        self._mem_wr_queue.append((self._write_word, address, value))
+    
+    def _write_ieee_float(self, address : int, value: float):
+        '''Write an IEEE 754 half-precision 16-bit float float representation of the stored value in [address, address + 1] bytes'''
+        assert address <= 0x3FFFF and address >= 0x00000
+        assert all(a in self._memory.keys() for a in [address, address + 1])
+        raw : bytes = pack('<e', value)
+        self._memory[address] = raw[0]
+        self._memory[address + 1] = raw[1]
+    
+    def write_ieee_float(self, address : int, value : float):
+        '''Queue a write request for an IEEE 754 half-precision 16-bit float value in a given address'''
+        assert address <= 0x3FFFF and address >= 0x00000
+        assert all(a in self._memory.keys() for a in [address, address + 1])
+        self._mem_wr_queue.append((self._write_ieee_float, address, value))
+    
+    def _memory_writer(self):
+        '''Process memory write requests'''
+        while not self._terminate:
+            if self._mem_wr_queue:
+                wr_request : tuple[function, int, bool | int | float] = self._mem_wr_queue.popleft()
+                try:
+                    wr_request[0](wr_request[1], wr_request[2])
+                except AssertionError:
+                    # Either:
+                    # - Address or value out of range
+                    # - Address has not been defined in the simulated device
+                    #
+                    # Do nothing to prevent any reconnaissance actions
+                    continue
+            sleep(0.03) # 30ms is a standard delay within a LAN, we don't expect faster requests from a single connection
+
+    # Physical process
     def simulate(self):
         '''
         Override this method with the physical simulation of the
@@ -203,7 +317,7 @@ class IEDBase(Thread):
                 self._sock.sendto(pkt.build(), (SIM_BCAST, simproto.SIM_PORT))
             sleep(0.333)
 
-    def _log(self, message:str, prio:int=LOG_PRIO['INFO']):
+    def log(self, message:str, prio:int=LOG_PRIO['INFO']):
         if self._logfile is not None and isinstance(self._logfile, io.TextIOBase):
             line = datetime.now().ctime()
             msg = message.replace("\n", "").replace("\r","")
@@ -219,9 +333,11 @@ class IEDBase(Thread):
         msghandler = Thread(target=self.msg_handler)
         identify = Thread(target=self.identify_neighbors)
         simhandler = Thread(target=self.sim_handler)
+        memwriter = Thread(target=self._memory_writer)
         msghandler.start()
         identify.start()
         simhandler.start()
+        memwriter.start()
         while not self._terminate: # Receive incomming messages and add them to the message queue
             try:
                 msgdata, msgfrom = self._sock.recvfrom(BUFFER_SIZE)
@@ -229,6 +345,7 @@ class IEDBase(Thread):
                 self._msgqueue.append([msgfrom, msgdata])
             except timeout:
                 pass
+        memwriter.join()
         simhandler.join()
         identify.join()
         msghandler.join()
@@ -269,3 +386,17 @@ class DeviceHandler(Thread):
             # Place here the handling of any incoming ICS protocol connection
             sleep(1)
         self._device.join()
+
+class ProtocolListener(Thread):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._terminate = False
+    
+    @property
+    def terminate(self) -> bool:
+        return self._terminate
+    
+    @terminate.setter
+    def terminate(self, value : bool = False):
+        self._terminate = value
