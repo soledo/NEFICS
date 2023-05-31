@@ -1,0 +1,86 @@
+ <html>
+ <head>
+ 	<link rel="stylesheet" href="../css/radevice.css" type="text/css">
+ 	<script language="javascript" type="text/javascript" src="../scripts/refresh.js"></script>
+ </head>
+ <body bgcolor="#b7b6b6" onload="refreshInit();">
+ 	<table width="98%" cellspacing="0" cellpadding="0" align="center" style="border: solid #002569 1px;">
+ 		<tr bgcolor="#ffffff">
+ 		<td style="padding-top: 15px; padding-bottom: 20px;">
+ 			<table width="98%" border="0" cellspacing="0" cellpadding="0" align="center">
+ 				<tr>
+ 				<td valign="top">
+<table width="100%" cellspacing="0" cellpadding="2" border="0">
+<tr><td colspan="2" bgcolor="#BDC8DD"><font size="2">
+	<b>EtherNet/IP Errors</b>
+</font></td></tr>
+  <tr bgcolor="#dedede"><td>UDP Output Sendto Error</td><td>0</td></tr>
+  <tr><td>UDP Input Length Error</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>UDP Input Checksum Error</td><td>0</td></tr>
+  <tr><td>IP  Input Checksum Error</td><td>0</td></tr>
+</table><br><table width="100%" cellspacing="0" cellpadding="2" border="0">
+<tr><td colspan="2" bgcolor="#BDC8DD"><font size="2">
+	<b>MotFec Driver Errors</b>
+</font></td></tr>
+  <tr bgcolor="#dedede"><td>CRC error</td><td>0</td></tr>
+  <tr><td>Babbling receive error</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Babbling transmit error</td><td>0</td></tr>
+  <tr><td>Heart beat check fail</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Late collision</td><td>0</td></tr>
+  <tr><td>Transmit underrun</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Carrier sense</td><td>0</td></tr>
+  <tr><td>Retransmit limit</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Length violation</td><td>0</td></tr>
+  <tr><td>Not aligned </td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Receive overrun</td><td>0</td></tr>
+  <tr><td>Truncated frame </td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Runt packet</td><td>0</td></tr>
+  <tr><td>Memory problem</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Multicast filter reject</td><td>0</td></tr>
+  <tr><td>Multicast hash overflow</td><td>0</td></tr>
+</table><br><table width="100%" cellspacing="0" cellpadding="2" border="0">
+<tr><td colspan="2" bgcolor="#BDC8DD"><font size="2">
+	<b>Duplicate IP Detection</b>
+</font></td></tr>
+<tr bgcolor="#dedede">
+<td>Address in Conflict: C4:54:44:F2:1D:D5</td></tr>
+<tr>
+<td>ARP Packet: 00 1d 9c d3 be 80 c4 54 44 f2 1d d5 08 06 00 01 08 00 06 04 00 02 c4 54 44 f2 1d d5 c0 a8 01 0a 00 1d 9c d3 be 80 00 00 00 00 </td></tr>
+<tr bgcolor="#dedede">
+<td>ARP Operation: Response to previous request (00 02)</td></tr>
+<tr>
+<td>ARP Sender Hw Address: C4:54:44:F2:1D:D5</td></tr>
+<tr bgcolor="#dedede">
+<td>ARP Sender IP Address: 192.168.1.10</td></tr>
+<tr>
+<td>ARP Target Hw Address: 00:1D:9C:D3:BE:80</td></tr>
+<tr bgcolor="#dedede">
+<td>ARP Target IP Address: 0.0.0.0</td></tr>
+<tr>
+<td>ARP Packets in Conflict Received: 1</td></tr>
+<tr bgcolor="#dedede">
+<td>Module Phase during Conflict: Address Probe</td></tr>
+<tr>
+<td>Module Uptime: 01h:55m:50s</td></tr>
+<tr bgcolor="#dedede">
+<td>Module Incarnation Id: 0x1</td></tr>
+<tr>
+<td>(Current Module Incarnation Id: 0x27)</td>
+</tr>
+</table>
+ <table width="100%" cellspacing="0" cellpadding="2" border="0">
+ <tr>
+ <td align="center">
+ <p align="center" valign="middle">
+ <form onSubmit="jsRefresh(); return false;">
+ Seconds Between Refresh:&#160;
+ <input type="text" id="refresh" value="15" size="3" maxlength="3" style="font-size: 10;"/>
+ &#160;Disable Refresh with 0.
+ </form>
+ </p>
+ </td>
+ </tr>
+ </table></table></table>
+ <br>&nbsp;&nbsp;Copyright &copy; 2009 Rockwell Automation, Inc. All Rights Reserved. 
+ </body>
+ </html>

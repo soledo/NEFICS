@@ -81,6 +81,20 @@ class PLCDevice(IEDBase):
     @property
     def protocols(self) -> list[str]:
         return self._protocols
+    
+    def __str__(self) -> str:
+        devicestr : str = (
+            f'    ### Emulated PLC Device\r\n'
+            f'     ## Module: {self.__class__.__module__}\r\n'
+            f'     ## Class:  {self.__class__.__name__}\r\n'
+            f'      # Configured device information:\r\n\r\n'
+            f'        Vendor name:  {self._vendor_name}\r\n'
+            f'        Product code: {self._product_code}\r\n'
+            f'        Revision:     {self._revision}\r\n'
+            f'        Device name:  {self._device_name}\r\n'
+            f'        Device model: {self._device_model}\r\n'
+        )
+        return devicestr
 
 class PLCHandler(DeviceHandler):
 

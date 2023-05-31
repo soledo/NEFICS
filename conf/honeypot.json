@@ -27,6 +27,31 @@
                 {"name": "eth0", "ip": "192.168.0.251/24", "switch": "s1"}
             ],
             "routes": [["default", "192.168.0.1"]]
+        },
+        {
+            "name" : "allen1756",
+            "interfaces" : [
+                {"name" : "eth0", "ip" : "10.0.0.10/24", "switch" : "s2"}
+            ],
+            "routes" : [["default", "10.0.0.250"]],
+            "launcher" : {
+                "module" : "honeypot",
+                "device" : "PLCDevice",
+                "handler" : "PLCHandler",
+                "guid" : 10, "in" : [], "out": [],
+                "parameters" : {
+                    "html" : "html/AB1756ENBTA",
+                    "httpsrv" : "GoAhead-Webs",
+                    "protos" : ["http", "modbus"],
+                    "info" : {
+                        "vname" : "Allen-Bradley",
+                        "pcode" : "00D65567",
+                        "rev" : "6.006 Build 4",
+                        "dname" : "1756-ENBT/A",
+                        "model" : "1756-ENBT/A"
+                    }
+                }
+            }
         }
     ]
 }

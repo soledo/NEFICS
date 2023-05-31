@@ -1,0 +1,51 @@
+ <html>
+ <head>
+ 	<link rel="stylesheet" href="../css/radevice.css" type="text/css">
+ 	<script language="javascript" type="text/javascript" src="../scripts/refresh.js"></script>
+ </head>
+ <body bgcolor="#b7b6b6" onload="refreshInit();">
+ 	<table width="98%" cellspacing="0" cellpadding="0" align="center" style="border: solid #002569 1px;">
+ 		<tr bgcolor="#ffffff">
+ 		<td style="padding-top: 15px; padding-bottom: 20px;">
+ 			<table width="98%" border="0" cellspacing="0" cellpadding="0" align="center">
+ 				<tr>
+ 				<td valign="top">
+<table width="100%" cellspacing="0" cellpadding="2" border="0">
+<tr><td><font size="2">
+	<b>Encapsulation Statistics</b>
+</font></td></tr>
+  <tr bgcolor="#dedede"><td>Commands Received</td><td>0</td></tr>
+  <tr><td>Replies Sent</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Error Replies Sent</td><td>0</td></tr>
+  <tr><td>Commands Sent</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Replies Received</td><td>0</td></tr>
+  <tr><td>Error Replies Received</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Unhandled Commands</td><td>0</td></tr>
+  <tr><td>Unhandled Bad Data</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Bad Session ID</td><td>0</td></tr>
+  <tr><td>Bad Target ID</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Unsupported Revision</td><td>0</td></tr>
+  <tr><td>Cumulative Encap (TCP) Connections</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Active Total Encap (TCP) Connections</td><td>0</td></tr>
+  <tr><td>Active Incoming Encap (TCP) Connections</td><td>0</td></tr>
+  <tr bgcolor="#dedede"><td>Active Outgoing Encap (TCP) Connections</td><td>0</td></tr>
+  <tr><td>Total Encap (TCP) Connection Limit</td><td>64</td></tr>
+  <tr bgcolor="#dedede"><td>Incoming Encap (TCP) Connection Limit</td><td>64</td></tr>
+  <tr><td>Outgoing Encap (TCP) Connection Limit</td><td>64</td></tr>
+</table>
+ <table width="100%" cellspacing="0" cellpadding="2" border="0">
+ <tr>
+ <td align="center">
+ <p align="center" valign="middle">
+ <form onSubmit="jsRefresh(); return false;">
+ Seconds Between Refresh:&#160;
+ <input type="text" id="refresh" value="15" size="3" maxlength="3" style="font-size: 10;"/>
+ &#160;Disable Refresh with 0.
+ </form>
+ </p>
+ </td>
+ </tr>
+ </table></table></table>
+ <br>&nbsp;&nbsp;Copyright &copy; 2009 Rockwell Automation, Inc. All Rights Reserved. 
+ </body>
+ </html>

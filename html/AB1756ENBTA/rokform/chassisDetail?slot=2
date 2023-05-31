@@ -1,0 +1,80 @@
+<html>
+<head> 
+	<title>Rockwell Automation</title> 
+	<link type="text/css" href="../css/radevice.css" rel="stylesheet"> 
+</head> 
+ 
+<body bgcolor="#b7b6b6" leftmargin="0" topmargin="0" rightmargin="0" bottommargin="0" marginwidth="0"> 
+<div style="MARGIN-LEFT: 10px"><!-- Start tabs --> 
+<table width="98%" border="0" cellspacing="0" cellpadding="0"> 
+	<tr> 
+		<td nowrap width="6" valign="top"><IMG height=16 src="../images/menustartoff.gif" width=10 border=0></td> 
+		<td nowrap background="../images/menubgoff.gif"><a class="tab" href="../chassisWho.asp">Browse Chassis</a></td> 
+		<td nowrap><IMG height=16 src="../images/mensepoffon.gif" width=23 border=0></td> 
+		<td nowrap background="../images/menubgon.gif">Module Information</td> 
+		<td nowrap><IMG height=16 src="../images/menseponoff.gif" width=23 border=0></td> 
+		<td nowrap background="../images/menubgoff.gif"><a class="tab" href="chassisDetail?slot=2&amp;pagereq=backplane">Backplane Statistics</a></td> 
+		<td nowrap><IMG height=16 src="../images/mensepoffoff.gif" width=23 border=0></td> 
+		<td nowrap background="../images/menubgoff.gif"><a class="tab" href="chassisDetail?slot=2&amp;pagereq=conmanage">Connection Manager Statistics</a></td> 
+		<td nowrap><IMG height=16 src="../images/menuendoff.gif" width=20 border=0></td> 
+		<td nowrap width="100%" align="right" background="../images/menuendbg.gif"></td> 
+	</tr> 
+</table><!-- End tabs --><!-- Start tab background --> 
+<table width="98%" border="0" cellspacing="0" cellpadding="0" bgcolor="#002569"> 
+	<tr> 
+		<td width="1"><IMG height=1 src="../images/border.gif" width=1 border=0></td> 
+		<td width="100%" bgcolor="#ffffff"> 
+		<br><!-- Body starts here --> 
+		<table width="100%" border="0" cellspacing="10" cellpadding="0"> 
+			<tr> 
+				<td valign="top"> 
+				 
+<table width="500" border="0" cellspacing="0" cellpadding="4"> 
+	<tr> 
+		<td valign="top"><font size="2"><b>Module Information: Slot 2</b></font></td> 
+	</tr> 
+	<tr bgcolor="#dedede">
+		<td>Product Name</td>
+		<td>1756-DNB/E</td>
+	</tr>
+	<tr>
+		<td>Vendor</td>
+		<td>1</td>
+	</tr>
+	<tr bgcolor="#dedede">
+		<td>Product Type</td>
+		<td>12</td>
+	</tr>
+	<tr>
+		<td>Product Code</td>
+		<td>14</td>
+	</tr>
+	<tr bgcolor="#dedede">
+		<td>Module Revision</td>
+		<td>12.005</td>
+	</tr>
+	<tr>
+		<td>Serial Number</td>
+		<td>00E0A218</td>
+	</tr>
+	<tr bgcolor="#dedede">
+		<td>Module Status</td>
+		<td>Unconnected</td>
+	</tr>
+	</table>
+				<br> 
+				<br> 
+				</td> 
+			</tr> 
+		</table><!-- Do not modify below this point --> 
+		 
+		</td> 
+		<td width="1"><IMG height=1 src="../images/border.gif" width=1 border=0></td> 
+	</tr> 
+	<tr> 
+		<td > 
+		</td> 
+	</tr> 
+</table>
+<br>Copyright &copy; 2009 Rockwell Automation, Inc. All Rights Reserved.
+</body> 

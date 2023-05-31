@@ -283,7 +283,7 @@ class ModbusHandler(Thread):
             ModbusReadCodes(readcode)
         except ValueError:
             return smb.ModbusPDU2B0EReadDeviceIdentificationError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE)
-        device_id : dict[int, str] = self._device.device_id()
+        device_id : dict[int, str] = self._device.device_id
         if readcode < ModbusReadCodes.SPECIFIC.value:
             # Stream access available device information (codes 0x01 - 0x03)
             respdu = smb.ModbusPDU2B0EReadDeviceIdentificationResponse(readCode=readcode, conformityLevel=0x80 + readcode, objCount=3 + (2 if readcode > ModbusReadCodes.BASIC.value else 0), nextObjId=ModbusDeviceID.VENDOR_NAME.value)
@@ -339,6 +339,7 @@ class ModbusHandler(Thread):
                     # Error on MBAP => MB indication discarded
                     continue
                 transaction_id = request.transId
+                unit_id = request.unitId
                 request_pdu = request.payload
                 function_code = request_pdu.funcCode
                 try:
@@ -351,12 +352,13 @@ class ModbusHandler(Thread):
                     rawpdu : bytes = bytes(request_pdu)
                     function_code : int = (int(rawpdu[0]) + 0x80) & 0xff if int(rawpdu[0]) < 0x80 else int(rawpdu[0]) # The response function code = the request function code + 0x80
                     # Exception Response with code 0x01 (Illegal function code)
-                    response : smb.ModbusADUResponse = smb.ModbusADUResponse(transId=transaction_id)/bytes([function_code, ModbusErrorCode.ILLEGAL_FUNCTION_CODE.value])
+                    response : smb.ModbusADUResponse = smb.ModbusADUResponse(transId=transaction_id, unitId=unit_id)/bytes([function_code, ModbusErrorCode.ILLEGAL_FUNCTION_CODE.value])
                     sock.send(response.build())
                     continue
-                response : smb.ModbusADUResponse = smb.ModbusADUResponse(transId=transaction_id)
+                response : smb.ModbusADUResponse = smb.ModbusADUResponse(transId=transaction_id, unitId=unit_id)
                 # Process the MODBUS Indication according to the corresponding code
                 response /= indication_handlers[function_code](function_code, request_pdu)
+                sock.send(response.build())
             except (timeout, BrokenPipeError):
                 # Either there was no communication with the other end for a long period of time
                 # or the connection was closed
@@ -383,7 +385,7 @@ class ModbusListener(ProtocolListener):
                 self._handlers.append(new_handler)
                 new_handler.start()
             except timeout:
-                incoming.close()
+                pass
         while any(hnd.is_alive() for hnd in self._handlers):
             for hnd in self._handlers:
                 hnd.terminate = True
