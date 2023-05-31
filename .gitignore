@@ -1,6 +1,9 @@
 # Research data
 data/
 
+# Misc
+rokform/
+
 # IDE workspace metadata
 .vscode/
 

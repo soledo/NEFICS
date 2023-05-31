@@ -54,7 +54,7 @@ class HTTPHandler(SimpleHTTPRequestHandler):
                 content = file.read()
                 content = self.replace_content(content)
                 self.send_response(200)
-                self.send_header('Content-Type', self.guess_type(path))
+                self.send_header('Content-Type', self.guess_type(path) if path.lower().split('.')[-1] != 'asp' else 'text/html; charset=utf-8')
                 self.send_header('Content-Length', len(content))
                 self.end_headers()
                 self.wfile.write(content)
