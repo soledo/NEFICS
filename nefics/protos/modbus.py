@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
 # Standard imports
+import sys
+import struct
 from math import ceil
 from enum import Enum
 from threading import Thread
-from socket import socket, timeout, AF_INET, SOCK_STREAM, IPPROTO_TCP
+from socket import socket, timeout, AF_INET, SOCK_STREAM, IPPROTO_TCP, SHUT_RDWR
+from typing import Union
 # Scapy imports
 from scapy.packet import Packet
 import scapy.contrib.modbus as smb
@@ -13,6 +16,8 @@ from nefics.modules.devicebase import IEDBase, ProtocolListener
 
 MODBUS_TCP_PORT = 502
 MODBUS_MAX_LENGTH = 260
+
+MODBUS_TIMEOUT = 60 # Not defined in the specification. We chose a minute as a reasonable timeout for modbus.
 
 MODBUS_WRITE_COIL_VALUES = {
     0x0000: False,
@@ -144,7 +149,7 @@ class ModbusHandler(Thread):
             return smb.ModbusPDU06WriteSingleRegisterError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
         else:
             try:
-                self._device.write_word(address, value)
+                self._device.write_word(ModbusMemmap.HR.value + address, value)
                 return smb.ModbusPDU06WriteSingleRegisterResponse(registerAddr=address, registerValue=value)
             except AssertionError:
                 # Exception Response with code 0x04 (Server Failure)
@@ -380,7 +385,7 @@ class ModbusListener(ProtocolListener):
         while not self._terminate:
             try:
                 incoming, iaddr = listening_sock.accept()
-                incoming.settimeout(60)
+                incoming.settimeout(MODBUS_TIMEOUT)
                 new_handler = ModbusHandler(device=self._device, connection=incoming)
                 self._handlers.append(new_handler)
                 new_handler.start()
@@ -392,3 +397,133 @@ class ModbusListener(ProtocolListener):
                 hnd.join(1)
         listening_sock.close()
 
+class ModbusClient:
+    """
+    Modbus TCP Client
+
+    Uses a TCP socket to connect to a remote Modbus device, and provides
+    the funcitonality to interact with the Coils, Direct Inputs, Input
+    Registers, and Holding Registers.
+
+    All the supported write requests are for single values. That is, this
+    class supports the Modbus function codes 0x05 and 0x06 for writing
+    values in the device.
+    """
+    
+    def __init__(self, ipaddr : str):
+        """
+        Instantiates a new Modbus TCP Client with the socket used to connect to the device.
+
+        :param ipaddr: The IPv4 address of the device.
+        :type ipaddr: str
+        """
+        self._sock : socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        self._sock.settimeout(MODBUS_TIMEOUT)
+        self._ipaddr : str = ipaddr
+    
+    def __str__(self) -> str:
+        return f'Modbus TCP Client ({self._ipaddr}:{MODBUS_TCP_PORT})'
+    
+    def close(self):
+        """
+        Close the connection with the device.
+        """
+        try:
+            self._sock.shutdown(SHUT_RDWR)
+            self._sock.close()
+        except OSError as e:
+            sys.stderr.write(f'Error closing socket: {str(e)}')
+            sys.stderr.flush()
+    
+    def connect(self):
+        """
+        Attempt to connect to the device
+        """
+        connected : bool = False
+        retries : int = 0
+        max_retries : int = 5
+        while not connected and retries < max_retries:
+            try:
+                self._sock.connect((self._ipaddr, MODBUS_TCP_PORT))
+                connected = True
+            except timeout:
+                sys.stderr.write(f'Unable to connect to {self._ipaddr}:{MODBUS_TCP_PORT}')
+                sys.stderr.flush()
+                retries += 1
+        if not connected:
+            sys.stderr.write(f'Failed to establish connection after {max_retries} attempts.')
+            sys.stderr.flush()
+    
+    def reconnect(self):
+        """
+        Attempt to reconnect to the device
+        """
+        self.close()
+        self.connect()
+    
+    def send_float(self, address : int, value : float, transaction : int = 0x00, unit : int = 0x00):
+        """
+        Send a float value to a Modbus holding register in the device.
+
+        :param address: The address of the holding register in the device. Must be in the range [0, 65534].
+        :type address: int
+        :param value: The float value to store in the holding register.
+        :type value: float
+        :param transaction: The Modbus transaction ID to use in the request. Must be in the range [0, 255], defaults to 0x00.
+        :type transaction: int, optional
+        :param unit: The Modbus unit ID to use in the request. Must be in the range [0, 255], defaults to 0x00.
+        :type unit: int, optional
+
+        :raises AssertionError: If a parameter value is out of range or if a Modbus exception is received as a result of the transaction.
+        :raises struct.error: If the float value cannot be encoded using the IEEE 754 16-bit half precision format.
+        :raises BrokenPipe: If the socket disconnects from the device.
+        :raises socket.timeout: If a socket timeout occurs.
+        """
+        assert address >= 0 and address <= 65534, f'Address out of range ({address})'
+        assert transaction >= 0 and transaction <= 255, f'Transaction ID out of range ({transaction})'
+        assert unit >= 0 and unit <= 255, f'Unid ID out of range ({unit})'
+        mb_value : int = struct.unpack('<H',struct.pack('<e', value))[0]
+        request : smb.ModbusADURequest = smb.ModbusADURequest(transId=transaction, unitId=unit)
+        request /= smb.ModbusPDU06WriteSingleRegisterRequest(registerAddr=address, registerValue=mb_value)
+        self._sock.send(request.build())
+        buffer : bytes = self._sock.recv(MODBUS_MAX_LENGTH)
+        response : smb.ModbusADUResponse = smb.ModbusADUResponse(buffer)
+        pdu = response.payload
+        assert isinstance(pdu, smb.ModbusPDU06WriteSingleRegisterResponse), f'Modbus exception: 0x{pdu.exceptCode:02x}' if isinstance(pdu, smb.ModbusPDU06WriteSingleRegisterError) else f'Received unknown payload: {bytes(pdu)}'
+
+    def read_float(self, mapping : ModbusMemmap, address : int, transaction : int = 0x00, unit : int = 0x00) -> float:
+        """
+        Read a float value from the Modbus device registers.
+
+        :param mapping: The Modbus memory mapping type to read from (ModbusMemmap.IR for holding registers or ModbusMemmap.HR for input registers).
+        :type mapping: ModbusMemmap
+        :param address: The address of the register in the device. Must be in the range [0, 65534].
+        :type address: int
+        :param transaction: The Modbus transaction ID to use in the request. Must be in the range [0, 255]. (default: 0x00)
+        :type transaction: int
+        :param unit: The Modbus unit ID to use in the request. Must be in the range [0, 255]. (default: 0x00)
+        :type unit: int
+        :return: The float value read from the device.
+        :rtype: float
+        :raises AssertionError: If a parameter value is out of range or if a Modbus exception is received as a result of the transaction.
+        :raises struct.error: If the float value cannot be unpacked from the received data.
+        :raises socket.timeout: If a socket timeout occurs during the operation.
+        :raises BrokenPipe: If the socket disconnects from the device.
+        """
+        assert address >= 0 and address <= 65534, f'Address out of range ({address})'
+        assert mapping in [ModbusMemmap.IR, ModbusMemmap.HR], f'Invalid memory mapping ({mapping.value})'
+        assert transaction >= 0 and transaction <= 255, f'Transaction ID out of range ({transaction})'
+        assert unit >= 0 and unit <= 255, f'Unid ID out of range ({unit})'
+        pdus = {
+            ModbusMemmap.IR: smb.ModbusPDU03ReadHoldingRegistersRequest,
+            ModbusMemmap.HR: smb.ModbusPDU04ReadInputRegistersRequest
+        }
+        request : smb.ModbusADURequest = smb.ModbusADURequest(transId=transaction, unitId=unit)
+        request /= pdus[mapping](startAddr=address, quantity=1)
+        self._sock.send(request.build())
+        buffer : bytes = self._sock.recv(MODBUS_MAX_LENGTH)
+        response : smb.ModbusADUResponse = smb.ModbusADUResponse(buffer)
+        pdu = response.payload
+        assert isinstance(pdu, (smb.ModbusPDU03ReadHoldingRegistersResponse, smb.ModbusPDU04ReadInputRegistersResponse)), f'Modbus exception: 0x{pdu.exceptCode:02x}' if isinstance(pdu, (smb.ModbusPDU03ReadHoldingRegistersError, smb.ModbusPDU04ReadInputRegistersError)) else f'Received unknown payload: {bytes(pdu)}'
+        raw : int = pdu.registerVal[0]
+        return struct.unpack('<e', struct.pack('<H', raw))[0]

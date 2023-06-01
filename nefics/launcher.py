@@ -7,6 +7,7 @@ from time import sleep
 from threading import Thread
 
 from nefics.modules.devicebase import IEDBase, DeviceHandler
+from run_nefics import print_error
 
 def launcher_main():
     from importlib import import_module
@@ -27,61 +28,53 @@ def launcher_main():
         try:
             config = json.loads(configarg)
         except json.decoder.JSONDecodeError:
-            sys.stderr.write(f'{configarg} is not a valid JSON string\r\n')
-            sys.stderr.flush()
+            print_error(f'{configarg} is not a valid JSON string\r\n')
             sys.exit()
     # Assert whether the provided configuration has the minimum values
     try:
         required_values = ['module', 'handler', 'device', 'guid', 'in', 'out', 'parameters']
-        assert all(x in config.keys() for x in required_values)
-    except AssertionError:
-        sys.stderr.write(f'Corrupt configuration detected. Missing values: {", ".join([x for x in required_values if x not in config.keys()])}\r\n')
-        sys.stderr.flush()
+        assert all(x in config.keys() for x in required_values), f'Corrupt configuration detected. Missing values: {", ".join([x for x in required_values if x not in config.keys()])}\r\n'
+    except AssertionError as e:
+        print_error(str(e))
         sys.exit()
     # Assert whether the provided values are correctly typed
     try:
-        assert all(isinstance(x, str) for x in [config['module'], config['handler'], config['device']])
-        assert all(isinstance(x, list) for x in [config['in'], config['out']])
-        assert all(isinstance(x, int) for x in [config['guid']] + config['in'] + config['out'])
-    except AssertionError:
-        sys.stderr.write(f'Type mismatch detected within the provided configuration\r\n')
-        sys.stderr.flush()
+        assert all(isinstance(x, str) for x in [config['module'], config['handler'], config['device']]), f'A "module", "handler" or "device" value is not a string'
+        assert all(isinstance(x, list) for x in [config['in'], config['out']]), f'Either "in" or "out" values are not lists'
+        assert all(isinstance(x, int) for x in [config['guid']] + config['in'] + config['out']), f'"guid" or values in the "in" and "out" lists are not integers'
+    except AssertionError as e:
+        print_error(f'Type mismatch detected within the provided configuration.\r\n{str(e)}\r\n')
         sys.exit()
     # Try to import the specified device module
     try:
         device_module = import_module(f'nefics.modules.{config["module"]}')
     except ModuleNotFoundError:
-        sys.stderr.write(f'Could not find module "nefics.modules.{config["module"]}"\r\n')
-        sys.stderr.flush()
+        print_error(f'Could not find module "nefics.modules.{config["module"]}"\r\n')
         sys.exit()
     # Try to get the configured class from the specified module
     try:
         device_class = getattr(device_module, config['device'])
     except AttributeError:
-        sys.stderr.write(f'Could not find class "{config["device"]}" in module "nefics.modules.{config["module"]}"\r\n')
-        sys.stderr.flush()
+        print_error(f'Could not find class "{config["device"]}" in module "nefics.modules.{config["module"]}"\r\n')
         sys.exit()
     # Instantiate the device and assert whether it is compatible (devicebase.IEDBase)
     device = device_class(config['guid'], config['in'], config['out'], **config['parameters'])
     try:
-        assert isinstance(device, IEDBase)
-    except AssertionError:
-        sys.stderr.write(f'Instantiated device ({device_class.__name__}) is not supported by NEFICS\r\n')
-        sys.stderr.flush()
+        assert isinstance(device, IEDBase), f'Instantiated device ({device_class.__name__}) is not supported by NEFICS\r\n'
+    except AssertionError as e:
+        print_error(str(e))
         sys.exit()
     # Try to get the configured handler from the specified module
     try:
         handler_class = getattr(device_module, config['handler'])
     except AttributeError:
-        sys.stderr.write(f'Could not find class "{config["handler"]}" in module "nefics.modules.{config["module"]}"\r\n')
-        sys.stderr.flush()
+        print_error(f'Could not find class "{config["handler"]}" in module "nefics.modules.{config["module"]}"\r\n')
         sys.exit()
     handler = handler_class(device)
     try:
-        assert isinstance(handler, DeviceHandler)
-    except AssertionError:
-        sys.stderr.write(f'Instantiated handler ({handler.__name__}) is not supported by NEFICS\r\n')
-        sys.stderr.flush()
+        assert isinstance(handler, DeviceHandler), f'Instantiated handler ({handler.__name__}) is not supported by NEFICS\r\n'
+    except AssertionError as e:
+        print_error(str(e))
         sys.exit()
     signal.signal(signal.SIGINT, handler.set_terminate)
     signal.signal(signal.SIGTERM, handler.set_terminate)
