@@ -89,7 +89,7 @@ def launcher_main():
     while not handler.terminate:
         clearscreen()
         handler.status()
-        sleep(10)
+        sleep(1)
     handler.join()
     
 if __name__ == '__main__':

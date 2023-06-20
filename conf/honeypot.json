@@ -49,9 +49,15 @@
                         "rev" : "6.006 Build 4",
                         "dname" : "1756-ENBT/A",
                         "model" : "1756-ENBT/A"
-                    }
+                    },
+                    "phys_ip" : "10.0.0.110",
+                    "set_point" : 2.0
                 }
             }
         }
-    ]
+    ],
+    "localiface": {
+        "switch": "s2",
+        "iface": "eth1"
+    }
 }

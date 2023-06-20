@@ -2,11 +2,16 @@
 
 from sys import argv, exit
 from socket import AF_INET, IPPROTO_TCP, SOCK_STREAM, socket, timeout
-from typing import IO
+from typing import Union
 from netaddr import valid_ipv4
 from random import randint
+from re import compile
+from struct import pack, unpack
 from cmd import Cmd
 from scapy.contrib.modbus import *
+
+INT_RE = compile(r'^\d+$')
+FLT_RE = compile(r'^\d+[.]\d*$')
 
 class MBCLI(Cmd):
     prompt = '> '
@@ -49,7 +54,7 @@ class MBCLI(Cmd):
         except AssertionError:
             print(f'Invalid address or value')
     
-    def do_readhr(self, arg):
+    def readhr(self, arg : str) -> tuple[int, int]:
         try:
             hr_addr = int(arg)
             assert hr_addr >= 0
@@ -62,18 +67,62 @@ class MBCLI(Cmd):
             if data.haslayer(ModbusPDU03ReadHoldingRegistersResponse):
                 response = data['ModbusPDU03ReadHoldingRegistersResponse']
                 value:int = response.registerVal[0]
-                print(f'Holding register {hr_addr} value: {value}')
+                return hr_addr, value
             else:
                 data.show2()
         except AssertionError:
             print(f'Invalid register address')
+
+    def readir(self, arg : str) -> tuple[int, int]:
+        try:
+            hr_addr = int(arg)
+            assert hr_addr >= 0
+            assert hr_addr <= 65535
+            req:ModbusADURequest = ModbusADURequest(unitId=0x01, transId=randint(1, 65535))
+            req /= ModbusPDU04ReadInputRegistersRequest(startAddr=hr_addr, quantity=1)
+            self._sock.send(req.build())
+            buffer:bytes = self._sock.recv(2048)
+            data:ModbusADUResponse = ModbusADUResponse(buffer)
+            if data.haslayer(ModbusPDU04ReadInputRegistersResponse):
+                response = data['ModbusPDU04ReadInputRegistersResponse']
+                value:int = response.registerVal[0]
+                return hr_addr, value
+            else:
+                data.show2()
+        except AssertionError:
+            print(f'Invalid register address')
+  
+    def do_readir(self, arg):
+        hr_addr, value = self.readir(arg)
+        print(f'Input register {hr_addr} value: {value}')
+
+    def do_readhr(self, arg):
+        hr_addr, value = self.readhr(arg)
+        print(f'Holding register {hr_addr} value: {value}')
     
-    def do_writehr(self, arg):
+    def do_readir_f(self, arg):
+        hr_addr, value = self.readir(arg)
+        vbytes = bytes([value & 0xff, (value & 0xff00) >> 8])
+        value = unpack('<e', vbytes)[0]
+        print(f'Input register {hr_addr} value: {value:0.06f}')
+
+    def do_readhr_f(self, arg):
+        hr_addr, value = self.readhr(arg)
+        vbytes = bytes([value & 0xff, (value & 0xff00) >> 8])
+        value = unpack('<e', vbytes)[0]
+        print(f'Holding register {hr_addr} value: {value:0.2f}')
+    
+    def do_writehr(self, arg : str):
         try:
             hr_addr:int = int(arg.split(' ')[0])
-            value:int = int(arg.split(' ')[1])
+            raw_val : str = arg.split(' ')[1]
+            assert INT_RE.match(raw_val) or FLT_RE.match(raw_val)
+            value : Union[int, float] = int(raw_val) if INT_RE.match(raw_val) else float(raw_val)
             assert hr_addr >= 0 and hr_addr <= 65535
-            assert value >= 0 and value <= 65535
+            assert (isinstance(value, int) and value >= 0 and value <= 65535) or isinstance(value, float)
+            if isinstance(value, float):
+                vbytes = pack('<e', value)
+                value = vbytes[0] + (vbytes[1] << 8)
             req:ModbusADURequest = ModbusADURequest(unitId=0x01, transId=randint(1, 65535))
             req /= ModbusPDU06WriteSingleRegisterRequest(registerAddr=hr_addr, registerValue=value)
             self._sock.send(req.build())
@@ -99,7 +148,7 @@ if __name__ == '__main__':
     dport = int(argv[2]) if len(argv) > 2 else 502
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
     sock.connect((ipaddress, dport))
-    sock.settimeout(1)
+    sock.settimeout(300)
     cli = MBCLI(sock=sock)
     cli.cmdloop()
     sock.close()

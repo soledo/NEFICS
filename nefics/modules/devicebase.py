@@ -152,7 +152,7 @@ class IEDBase(Thread):
         '''Read a Little-Endian WORD representation of the stored value in [address, address + 1] bytes'''
         assert address <= 0x3FFFF and address >= 0x00000
         assert all(a in self._memory.keys() for a in [address, address + 1])
-        return int(unpack('<H', bytes([self._memory[address], self._memory[address + 1]]))[0])
+        return self._memory[address] + (self._memory[address + 1] << 8)
     
     def read_ieee_float(self, address : int) -> float:
         '''Read an IEEE 754 half-precision 16-bit float representation of the stored value in [address, address + 1] bytes'''
@@ -177,9 +177,8 @@ class IEDBase(Thread):
         assert address <= 0x3FFFF and address >= 0x00000
         assert value >= 0x0000 and value <= 0xFFFF
         assert all(a in self._memory.keys() for a in [address, address + 1])
-        raw : bytes = pack('<H', value)
-        self._memory[address] = raw[0]
-        self._memory[address + 1] = raw[1]
+        self._memory[address] = value & 0xff
+        self._memory[address + 1] = (value & 0xff00) >> 8
     
     def write_word(self, address : int, value : int):
         '''Queue a write request for a 16-bit WORD value in a given address'''

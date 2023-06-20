@@ -461,7 +461,7 @@ class ModbusClient:
         self.close()
         self.connect()
     
-    def send_float(self, address : int, value : float, transaction : int = 0x00, unit : int = 0x00):
+    def send_float(self, address : int, value : float, transaction : int = 0x01, unit : int = 0x01):
         """
         Send a float value to a Modbus holding register in the device.
 
@@ -491,7 +491,7 @@ class ModbusClient:
         pdu = response.payload
         assert isinstance(pdu, smb.ModbusPDU06WriteSingleRegisterResponse), f'Modbus exception: 0x{pdu.exceptCode:02x}' if isinstance(pdu, smb.ModbusPDU06WriteSingleRegisterError) else f'Received unknown payload: {bytes(pdu)}'
 
-    def read_float(self, mapping : ModbusMemmap, address : int, transaction : int = 0x00, unit : int = 0x00) -> float:
+    def read_float(self, mapping : ModbusMemmap, address : int, transaction : int = 0x01, unit : int = 0x01) -> float:
         """
         Read a float value from the Modbus device registers.
 
@@ -527,3 +527,151 @@ class ModbusClient:
         assert isinstance(pdu, (smb.ModbusPDU03ReadHoldingRegistersResponse, smb.ModbusPDU04ReadInputRegistersResponse)), f'Modbus exception: 0x{pdu.exceptCode:02x}' if isinstance(pdu, (smb.ModbusPDU03ReadHoldingRegistersError, smb.ModbusPDU04ReadInputRegistersError)) else f'Received unknown payload: {bytes(pdu)}'
         raw : int = pdu.registerVal[0]
         return struct.unpack('<e', struct.pack('<H', raw))[0]
+    
+    def send_word(self, address : int, value : int, transaction : int = 0x01, unit : int = 0x01):
+        """
+        Send a 16-bit integer value to a Modbus holding register in the device.
+
+        :param address: The address of the register in the device. Must be in the range [0, 65534].
+        :type address: int
+        :param value: The 16-bit integer value to store in the holding register. Must be in the range [0, 65535].
+        :type value: int
+        :param transaction: The Modbus transaction ID to use in the request. Must be in the range [0, 255], defaults to 0x00.
+        :type transaction: int, optional
+        :param unit: The Modbus unit ID to use in the request. Must be in the range [0, 255], defaults to 0x00.
+        :type unit: int, optional
+        :raises AssertionError: If a parameter value is out of range or if a Modbus exception is received as a result of the transaction.
+        :raises socket.timeout: If a socket timeout occurs during the operation.
+        :raises BrokenPipe: If the socket disconnects from the device.
+        """
+        assert address >= 0 and address <= 65534, f'Address out of range ({address})'
+        assert value >= 0 and value <= 65535, f'Value out of range ({value})'
+        assert transaction >= 0 and transaction <= 255, f'Transaction ID out of range ({transaction})'
+        assert unit >= 0 and unit <= 255, f'Unid ID out of range ({unit})'
+        request : smb.ModbusADURequest = smb.ModbusADURequest(transId = transaction, unitId = unit)
+        request /= smb.ModbusPDU06WriteSingleRegisterRequest(registerAddr = address, registerValue = value)
+        self._sock.send(request.build())
+        buffer : bytes = self._sock.recv(MODBUS_MAX_LENGTH)
+        response : smb.ModbusADUResponse = smb.ModbusADUResponse(buffer)
+        pdu = response.payload
+        assert isinstance(pdu, smb.ModbusPDU06WriteSingleRegisterResponse), f'Modbus exception: 0x{pdu.exceptCode:02x}' if isinstance(pdu, smb.ModbusPDU06WriteSingleRegisterError) else f'Received unknown payload: {bytes(pdu)}'
+
+    def read_word(self, mapping : ModbusMemmap, address : int, transaction : int = 0x01, unit : int = 0x01) -> int:
+        """
+        Read a 16-bit integer value from the Modbus device registers.
+
+        :param mapping: The Modbus memory mapping type to read from (ModbusMemmap.IR for holding registers or ModbusMemmap.HR for input registers).
+        :type mapping: ModbusMemmap
+        :param address: The address of the register in the device. Must be in the range [0, 65534].
+        :type address: int
+        :param transaction: The Modbus transaction ID to use in the request. Must be in the range [0, 255]. (default: 0x00)
+        :type transaction: int
+        :param unit: The Modbus unit ID to use in the request. Must be in the range [0, 255]. (default: 0x00)
+        :type unit: int
+        :return: The 16-bit integer value read from the device.
+        :rtype: int
+        :raises AssertionError: If a parameter value is out of range or if a Modbus exception is received as a result of the transaction.
+        :raises struct.error: If the float value cannot be unpacked from the received data.
+        :raises socket.timeout: If a socket timeout occurs during the operation.
+        :raises BrokenPipe: If the socket disconnects from the device.
+        """
+        assert address >= 0 and address <= 65534, f'Address out of range ({address})'
+        assert mapping in [ModbusMemmap.IR, ModbusMemmap.HR], f'Invalid memory mapping ({mapping.value})'
+        assert transaction >= 0 and transaction <= 255, f'Transaction ID out of range ({transaction})'
+        assert unit >= 0 and unit <= 255, f'Unid ID out of range ({unit})'
+        pdus = {
+            ModbusMemmap.HR: smb.ModbusPDU03ReadHoldingRegistersRequest,
+            ModbusMemmap.IR: smb.ModbusPDU04ReadInputRegistersRequest
+        }
+        request : smb.ModbusADURequest = smb.ModbusADURequest(transId=transaction, unitId=unit)
+        request /= pdus[mapping](startAddr=address, quantity=1)
+        self._sock.send(request.build())
+        buffer : bytes = self._sock.recv(MODBUS_MAX_LENGTH)
+        response : smb.ModbusADUResponse = smb.ModbusADUResponse(buffer)
+        pdu = response.payload
+        assert isinstance(pdu, (smb.ModbusPDU03ReadHoldingRegistersResponse, smb.ModbusPDU04ReadInputRegistersResponse)), f'Modbus exception: 0x{pdu.exceptCode:02x}' if isinstance(pdu, (smb.ModbusPDU03ReadHoldingRegistersError, smb.ModbusPDU04ReadInputRegistersError)) else f'Received unknown payload: {bytes(pdu)}'
+        value : int = pdu.registerVal[0]
+        return value
+
+    def send_bool(self, address : int, value : bool, transaction : int = 0x01, unit : int = 0x01):
+        """
+        Send a boolean value to a Modbus coil in the device.
+
+        :param address: The address of the register in the device. Must be in the range [0, 65534].
+        :type address: int
+        :param value: The boolean value to use while setting the coil state.
+        :type value: bool
+        :param transaction: The Modbus transaction ID to use in the request. Must be in the range [0, 255], defaults to 0x00.
+        :type transaction: int, optional
+        :param unit: The Modbus unit ID to use in the request. Must be in the range [0, 255], defaults to 0x00.
+        :type unit: int, optional
+        :raises AssertionError: If a parameter value is out of range or if a Modbus exception is received as a result of the transaction.
+        :raises socket.timeout: If a socket timeout occurs during the operation.
+        :raises BrokenPipe: If the socket disconnects from the device.
+        """
+        assert address >= 0 and address <= 65534, f'Address out of range ({address})'
+        assert value >= 0 and value <= 65535, f'Value out of range ({value})'
+        assert transaction >= 0 and transaction <= 255, f'Transaction ID out of range ({transaction})'
+        assert unit >= 0 and unit <= 255, f'Unid ID out of range ({unit})'
+        request : smb.ModbusADURequest = smb.ModbusADURequest(transId = transaction, unitId = unit)
+        request /= smb.ModbusPDU05WriteSingleCoilRequest(outputAddr = address, outputValue = value)
+        self._sock.send(request.build())
+        buffer : bytes = self._sock.recv(MODBUS_MAX_LENGTH)
+        response : smb.ModbusADUResponse = smb.ModbusADUResponse(buffer)
+        pdu = response.payload
+        assert isinstance(pdu, smb.ModbusPDU05WriteSingleCoilResponse), f'Modbus exception: 0x{pdu.exceptCode:02x}' if isinstance(pdu, smb.ModbusPDU05WriteSingleCoilError) else f'Received unknown payload: {bytes(pdu)}'
+
+    def read_bool(self, mapping : ModbusMemmap, address : int, transaction : int = 0x01, unit : int = 0x01) -> bool:
+        """
+        Read a boolean value from the Modbus device coils/discrete inputs.
+
+        :param mapping: The Modbus memory mapping type to read from (ModbusMemmap.CO for coils or ModbusMemmap.DI for discrete inputs).
+        :type mapping: ModbusMemmap
+        :param address: The address of the register in the device. Must be in the range [0, 65534].
+        :type address: int
+        :param transaction: The Modbus transaction ID to use in the request. Must be in the range [0, 255]. (default: 0x00)
+        :type transaction: int
+        :param unit: The Modbus unit ID to use in the request. Must be in the range [0, 255]. (default: 0x00)
+        :type unit: int
+        :return: The voolean value read from the device.
+        :rtype: bool
+        :raises AssertionError: If a parameter value is out of range or if a Modbus exception is received as a result of the transaction.
+        :raises struct.error: If the float value cannot be unpacked from the received data.
+        :raises socket.timeout: If a socket timeout occurs during the operation.
+        :raises BrokenPipe: If the socket disconnects from the device.
+        """
+        assert address >= 0 and address <= 65534, f'Address out of range ({address})'
+        assert mapping in [ModbusMemmap.CO, ModbusMemmap.DI], f'Invalid memory mapping ({mapping.value})'
+        assert transaction >= 0 and transaction <= 255, f'Transaction ID out of range ({transaction})'
+        assert unit >= 0 and unit <= 255, f'Unid ID out of range ({unit})'
+        pdus = {
+            ModbusMemmap.CO: smb.ModbusPDU01ReadCoilsRequest,
+            ModbusMemmap.DI: smb.ModbusPDU02ReadDiscreteInputsRequest
+        }
+        request : smb.ModbusADURequest = smb.ModbusADURequest(transId=transaction, unitId=unit)
+        request /= pdus[mapping](startAddr=address, quantity=1)
+        self._sock.send(request.build())
+        buffer : bytes = self._sock.recv(MODBUS_MAX_LENGTH)
+        response : smb.ModbusADUResponse = smb.ModbusADUResponse(buffer)
+        pdu = response.payload
+        assert isinstance(pdu, (smb.ModbusPDU01ReadCoilsResponse, smb.ModbusPDU02ReadDiscreteInputsResponse)), f'Modbus exception: 0x{pdu.exceptCode:02x}' if isinstance(pdu, (smb.ModbusPDU01ReadCoilsError, smb.ModbusPDU02ReadDiscreteInputsError)) else f'Received unknown payload: {bytes(pdu)}'
+        value : int = pdu.registerVal[0]
+        return value
+
+    def read_coil(self, address : int, transaction : int = 0x01, unit : int = 0x01) -> bool:
+        return self.read_bool(ModbusMemmap.CO, address, transaction, unit)
+    
+    def read_discrete_intput(self, address : int, transaction : int = 0x01, unit : int = 0x01) -> bool:
+        return self.read_bool(ModbusMemmap.DI, address, transaction, unit)
+    
+    def read_holding_float(self, address : int, transaction : int = 0x01, unit : int = 0x01) -> float:
+        return self.read_float(ModbusMemmap.HR, address, transaction, unit)
+    
+    def read_holding_word(self, address : int, transaction : int = 0x01, unit : int = 0x01) -> int:
+        return self.read_word(ModbusMemmap.HR, address, transaction, unit)
+    
+    def read_input_float(self, address : int, transaction : int = 0x01, unit : int = 0x01) -> float:
+        return self.read_float(ModbusMemmap.IR, address, transaction, unit)
+    
+    def read_input_word(self, address : int, transaction : int = 0x01, unit : int = 0x01) -> int:
+        return self.read_word(ModbusMemmap.IR, address, transaction, unit)

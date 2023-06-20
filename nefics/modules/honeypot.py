@@ -3,8 +3,11 @@
 # Standard imports
 import subprocess
 import os
+from enum import Enum
 from time import sleep
+# from math import max
 from datetime import datetime
+from threading import Thread
 # NEFICS imports
 from nefics.modules.devicebase import IEDBase, DeviceHandler, ProtocolListener, LOG_PRIO
 from nefics.protos import http, modbus
@@ -62,13 +65,37 @@ class HoneyHandler(DeviceHandler):
         self._process.terminate()
         self._process.wait(20)
 
+class PLCMemMapping(Enum):
+    TANK_LVL  : int = 0x20000
+    SET_POINT : int = 0x30000
+    VALVE_IN  : int = 0x30002
+    VALVE_OUT : int = 0x30004
+
+class PhysMemMapping(Enum):
+    # FactoryIO Modbus Mapping
+    TANK_LVL  : int = 0x0001 # IR
+    VALVE_IN  : int = 0x0000 # HR
+    VALVE_OUT : int = 0x0001 # HR
+
 class PLCDevice(IEDBase):
 
     def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+        assert 'phys_ip' in kwargs.keys() and isinstance(kwargs['phys_ip'], str)
+        assert 'set_point' in kwargs.keys() and isinstance(kwargs['set_point'], float) and kwargs['set_point'] > 0.0 and kwargs['set_point'] < 3.0
         self._html : str = kwargs['html'] if 'html' in kwargs.keys() and isinstance(kwargs['html'], str) else None
         self._httpsrv = kwargs['httpsrv'] if 'httpsrv' in kwargs.keys() and isinstance(kwargs['httpsrv'], str) else None
         self._protocols = kwargs['protos'] if 'protos' in kwargs.keys() and isinstance(kwargs['protos'], list) and all(isinstance(x, str) for x in kwargs['protos']) else None
+        self._phys_ip = kwargs['phys_ip']
+        set_point : int = int((1000.0 * kwargs['set_point']) / 3.0) # Set point (HR) [0-1000] <-> [0-3m]
+        self._memory[PLCMemMapping.TANK_LVL.value] = 0 # Water level meter (IR) [0-1000] <-> [0-3m]
+        self._memory[PLCMemMapping.TANK_LVL.value + 1] = 0
+        self._memory[PLCMemMapping.SET_POINT.value] =  set_point & 0xff
+        self._memory[PLCMemMapping.SET_POINT.value + 1] =  (set_point & 0xff00) >> 8
+        self._memory[PLCMemMapping.VALVE_IN.value] = 0 # Valve in (HR) [0-1000] <-> [0-100%]
+        self._memory[PLCMemMapping.VALVE_IN.value + 1] = 0
+        self._memory[PLCMemMapping.VALVE_OUT.value] = 0 # Valve out (HR) [0-1000] <-> [0-100%]
+        self._memory[PLCMemMapping.VALVE_OUT.value + 1] = 0
     
     @property
     def httpsrv_header(self) -> str:
@@ -83,6 +110,10 @@ class PLCDevice(IEDBase):
         return self._protocols
     
     def __str__(self) -> str:
+        ref : float = (self.read_word(PLCMemMapping.SET_POINT.value) * 3.0) / 1000.0
+        lvl : float = (self.read_word(PLCMemMapping.TANK_LVL.value) * 3.0) / 1000.0
+        v_in : float = self.read_word(PLCMemMapping.VALVE_IN.value) / 10.0
+        v_out : float = self.read_word(PLCMemMapping.VALVE_OUT.value) / 10.0
         devicestr : str = (
             f'    ### Emulated PLC Device\r\n'
             f'     ## Module: {self.__class__.__module__}\r\n'
@@ -92,9 +123,46 @@ class PLCDevice(IEDBase):
             f'        Product code: {self._product_code}\r\n'
             f'        Revision:     {self._revision}\r\n'
             f'        Device name:  {self._device_name}\r\n'
-            f'        Device model: {self._device_model}\r\n'
+            f'        Device model: {self._device_model}\r\n\r\n'
+            f'      # Status\r\n'
+            f'        Set point:  {ref:0.2f} m\r\n'
+            f'        Tank level: {lvl:0.2f} m\r\n'
+            f'        Valve in:   {v_in:0.2f} %\r\n'
+            f'        Valve out:  {v_out:0.2f} %\r\n'
         )
         return devicestr
+    
+    def sync(self):
+        phys : modbus.ModbusClient = modbus.ModbusClient(self._phys_ip)
+        phys.connect()
+        while not self._terminate:
+            lvl = phys.read_input_word(PhysMemMapping.TANK_LVL.value, unit=1)
+            self._write_word(PLCMemMapping.TANK_LVL.value, lvl)
+            phys.send_word(PhysMemMapping.VALVE_IN.value, self.read_word(PLCMemMapping.VALVE_IN.value), unit=1)
+            phys.send_word(PhysMemMapping.VALVE_OUT.value, self.read_word(PLCMemMapping.VALVE_OUT.value), unit=1)
+        phys.close()
+
+    def simulate(self):
+        sync_thread = Thread(target=self.sync)
+        sync_thread.start()
+        t_s : float = 0.1 # Sample time
+        e_i : float = 0.0 # Error
+        h_0 : float = 1.5 # Linearization point
+        while not self._terminate:
+            ref : float = (self.read_word(PLCMemMapping.SET_POINT.value) * 3.0) / 1000.0
+            lvl = self.read_word(PLCMemMapping.TANK_LVL.value)
+            lvl = (lvl * 3.0) / 1000.0
+            e_i = e_i + (ref - lvl) * t_s
+            e_i = max(-15, e_i) if e_i < 15 else 15
+            v_in : int = int( (-0.79 * (lvl - h_0) + 0.07 * e_i + 0.5) * 1000)
+            v_out : int = int( (0.79 * (lvl - h_0) -0.07 * e_i + 0.5) * 1000)
+            v_in = max(0, v_in) if v_in < 1000 else 1000
+            v_out = max(0, v_out) if v_out < 1000 else 1000
+            self._write_word(PLCMemMapping.VALVE_IN.value, v_in)
+            self._write_word(PLCMemMapping.VALVE_OUT.value, v_out)
+            sleep(t_s)
+        sync_thread.join()
+
 
 class PLCHandler(DeviceHandler):
 
