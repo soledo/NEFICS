@@ -8,6 +8,7 @@ from time import sleep
 # from math import max
 from datetime import datetime
 from threading import Thread
+from typing import Union, Callable
 # NEFICS imports
 from nefics.modules.devicebase import IEDBase, DeviceHandler, ProtocolListener, LOG_PRIO
 from nefics.protos import http, modbus
@@ -33,7 +34,7 @@ class HoneyHandler(DeviceHandler):
         check_honey = subprocess.call(['which', 'honeyd'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
         if check_honey != 0:
             raise FileNotFoundError(2, 'Cannot find executable', 'honeyd')
-        self._process = None
+        self._process : Union[subprocess.Popen, None] = None
     
     def _respawn(self):
         if isinstance(self._process, subprocess.Popen):
@@ -62,8 +63,9 @@ class HoneyHandler(DeviceHandler):
                 # Process terminated, respawning
                 self._respawn()
             sleep(5)
-        self._process.terminate()
-        self._process.wait(20)
+        if isinstance(self._process, subprocess.Popen):
+            self._process.terminate()
+            self._process.wait(20)
 
 class PLCMemMapping(Enum):
     TANK_LVL  : int = 0x20000
@@ -83,9 +85,9 @@ class PLCDevice(IEDBase):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert 'phys_ip' in kwargs.keys() and isinstance(kwargs['phys_ip'], str)
         assert 'set_point' in kwargs.keys() and isinstance(kwargs['set_point'], float) and kwargs['set_point'] > 0.0 and kwargs['set_point'] < 3.0
-        self._html : str = kwargs['html'] if 'html' in kwargs.keys() and isinstance(kwargs['html'], str) else None
+        self._html : Union[str, None] = kwargs['html'] if 'html' in kwargs.keys() and isinstance(kwargs['html'], str) else None
         self._httpsrv = kwargs['httpsrv'] if 'httpsrv' in kwargs.keys() and isinstance(kwargs['httpsrv'], str) else None
-        self._protocols = kwargs['protos'] if 'protos' in kwargs.keys() and isinstance(kwargs['protos'], list) and all(isinstance(x, str) for x in kwargs['protos']) else None
+        self._protocols : Union[list[str], None] = kwargs['protos'] if 'protos' in kwargs.keys() and isinstance(kwargs['protos'], list) and all(isinstance(x, str) for x in kwargs['protos']) else None
         self._phys_ip = kwargs['phys_ip']
         set_point : int = int((1000.0 * kwargs['set_point']) / 3.0) # Set point (HR) [0-1000] <-> [0-3m]
         self._memory[PLCMemMapping.TANK_LVL.value] = 0 # Water level meter (IR) [0-1000] <-> [0-3m]
@@ -106,7 +108,7 @@ class PLCDevice(IEDBase):
         return self._html if self._html is not None else ''
     
     @property
-    def protocols(self) -> list[str]:
+    def protocols(self) -> Union[list[str], None]:
         return self._protocols
     
     def __str__(self) -> str:
@@ -185,14 +187,11 @@ class PLCHandler(DeviceHandler):
 
     def _start_http(self):
         try:
-            http_args : dict[str,str] = {}
-            http_args['server_header'] = self._device.httpsrv_header
             hpath = self._device.html_path
             assert len(hpath)
             assert os.path.exists(hpath)
             assert os.path.isdir(hpath)
-            http_args['static_dir'] = hpath
-            listener : ProtocolListener = http.HTTPListener(**http_args)
+            listener : ProtocolListener = http.HTTPListener(server_header=self._device.httpsrv_header, static_dir=hpath)
             self._protocols['http'] = listener
             listener.start()
         except AssertionError:
@@ -206,7 +205,7 @@ class PLCHandler(DeviceHandler):
     def run(self):
         self._device.start()
         if self._device.protocols is not None:
-            phandlers : dict[str, function]= {
+            phandlers : dict[str, Callable]= {
                 'http' : self._start_http,
                 'modbus' : self._start_modbus
             }
