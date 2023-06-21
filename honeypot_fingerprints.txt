@@ -1,7 +1,7 @@
-# ****** Honeypot fingerprints ******
+# ****** HoneyPLC fingerprints ******
 Fingerprint Allen-Bradley 1756-ENBT/A
 Class Allen-Bradley | embedded || specialized
-CPE: cpe:/o:windriver:vxworks
+CPE cpe:/o:windriver:vxworks
 SEQ(SP=99%GCD=1%ISR=A0%TI=I%CI=I%TS=1)
 OPS(O1=M5B4NW0NNT11%O2=M5B4NW0NNT11%O3=M5B4NW0NNT11%O4=M5B4NW0NNT11%O5=M5B4NW0NNT11%O6=M5B4NNT11)
 WIN(W1=2000%W2=2000%W3=2000%W4=2000%W5=2000%W6=2000)
@@ -35,7 +35,7 @@ IE(R=Y%DFI=N%T=40%CD=S)
 
 Fingerprint Allen-Bradley Micrologix 1400
 Class Allen-Bradley | embedded || specialized
-CPE: cpe:/h:siemens:simatic_300
+CPE cpe:/h:siemens:simatic_300
 SEQ(SP=106%GCD=1%ISR=10A%TI=I%CI=I%TS=U)
 SEQ(SP=105%GCD=1%ISR=108%TI=I%CI=RD%II=I%SS=S%TS=U)
 OPS(O1=M5C6NNNL%O2=M5C6NNNL%O3=M5C6NNNL%O4=M5C6NNNL%O5=M5C6NNNL%O6=M5C6NNNL)
@@ -70,7 +70,7 @@ IE(R=Y%DFI=S%T=40%CD=S)
 
 Fingerprint Phoenix Contact mGuard RS4000
 Class Phoenix Contact | embedded || firewall
-CPE: cpe:/o:linux:linux_kernel:2.6
+CPE cpe:/o:linux:linux_kernel:2.6
 SEQ(SP=106%GCD=2%ISR=10D%TI=Z%CI=I%TS=8)
 ECN(R=N)
 T1(R=Y%DF=Y%T=40%S=O%A=S+%F=AS%RD=0%Q=)
@@ -153,4 +153,3 @@ T3(R=Y%DF=N%TG=20%W=2000%S=O%A=O%F=A%O=%RD=0%Q=)
 T4(R=Y%DF=N%TG=20%W=2000%S=A%A=Z%F=R%O=%RD=0%Q=)
 U1(R=N)
 IE(R=Y%DFI=N%TG=20%CD=S)
-
