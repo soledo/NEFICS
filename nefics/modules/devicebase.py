@@ -12,9 +12,10 @@ from collections import deque
 from datetime import datetime
 from time import sleep
 from struct import pack, unpack
+from typing import Union
 
 if sys.platform not in ['win32']:
-    from socket import SO_REUSEPORT
+    from socket import SO_REUSEPORT # type: ignore
 
 # NEFICS imports
 import nefics.simproto as simproto
@@ -27,6 +28,7 @@ try:
         if valid_ipv4(a[0]['addr']):
             ipnet = IPNetwork(f'{a[0]["addr"]}/{a[0]["netmask"]}')
             break
+    assert isinstance(ipnet, IPNetwork), f'ERROR: Failed to determine local subnet information'
     SIM_BCAST = str(ipnet.broadcast)
 except IndexError:
     print('ERROR: Could not determine default broadcast address')
@@ -117,11 +119,11 @@ class IEDBase(Thread):
         self._terminate = value
     
     @property
-    def logfile(self) -> io.TextIOBase:
+    def logfile(self) -> Union[io.TextIOBase, None]:
         return self._logfile
     
     @logfile.setter
-    def logfile(self, value: io.TextIOBase):
+    def logfile(self, value: Union[io.TextIOBase, None]):
         self._logfile = value
 
     @property
