@@ -3,6 +3,7 @@
 import nmap3
 import argparse
 import sys
+from tqdm import tqdm
 
 def main():
     aparser = argparse.ArgumentParser()
@@ -13,9 +14,7 @@ def main():
     scans = int(args.num_scans)
     nm = nmap3.Nmap()
     results = []
-    for i in range(scans):
-        sys.stdout.write(f'\rScan {i+1}/{scans}')
-        sys.stdout.flush()
+    for i in tqdm(range(scans), unit='scans'):
         r = nm.nmap_os_detection(ip_addr)
         for rr in r[ip_addr]['osmatch']:
             results.append((rr['name'], rr['accuracy']))
