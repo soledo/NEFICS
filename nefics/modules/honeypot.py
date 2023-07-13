@@ -151,6 +151,7 @@ class PLCDevice(IEDBase):
         e_i : float = 0.0 # Error
         h_0 : float = 1.5 # Linearization point
         while not self._terminate:
+            # Simple LQI controller using a set point
             ref : float = (self.read_word(PLCMemMapping.SET_POINT.value) * 3.0) / 1000.0
             lvl = self.read_word(PLCMemMapping.TANK_LVL.value)
             lvl = (lvl * 3.0) / 1000.0

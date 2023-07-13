@@ -70,8 +70,10 @@ class MBCLI(Cmd):
                 return hr_addr, value
             else:
                 data.show2()
+                return None, None
         except AssertionError:
             print(f'Invalid register address')
+            return None, None
 
     def readir(self, arg : str) -> tuple[int, int]:
         try:
@@ -89,8 +91,10 @@ class MBCLI(Cmd):
                 return hr_addr, value
             else:
                 data.show2()
+                return None, None
         except AssertionError:
             print(f'Invalid register address')
+            return None, None
   
     def do_readir(self, arg):
         hr_addr, value = self.readir(arg)
