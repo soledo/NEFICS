@@ -35,7 +35,7 @@ class IOA(Field):
             return s[3:], self.m2i(pkt, unpack('<I', s[:3] + b'\x00')[0])
         return s[2:], self.m2i(pkt, unpack('<H', s[:2])[0])
     
-    def randval(self) -> VolatileValue[Any]:
+    def randval(self) -> VolatileValue:
         return RandShort()
 
 class NVA(Field):
