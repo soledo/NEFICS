@@ -2,7 +2,6 @@
 '''Packet definitions for IEC101/104'''
 
 # Global imports
-from copy import deepcopy
 from typing import Any, Optional
 from scapy.packet import Packet, Padding
 from scapy.fields import (
