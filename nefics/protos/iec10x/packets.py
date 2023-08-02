@@ -811,6 +811,103 @@ class IO51(IO):
     def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _number : Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
         super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x33], _number=_number, _balanced=_balanced, **fields)
 
+class IO58(IO):
+    name = 'Single command with time tag CP56Time2a'
+    __slots__ = ['sq', 'number', 'iolen', 'balanced']
+    fields_desc = [
+        IOA('IOA', 0x0000, check_balanced=lambda pkt: pkt.balanced),
+        BitEnumField('SE',0b0, 1, SE_ENUM),
+        BitField('QU', 0b00000, 5),
+        BitField('reserved',0b0, 1),
+        BitEnumField('SCS', 0, 1, SC_ENUM),
+        PacketField('time', CP56Time2a(), CP56Time2a)
+    ]
+
+    def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _iolen: int = 1, _number: Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
+        super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x3a], _number=_number, _balanced=_balanced, **fields)
+
+class IO59(IO):
+    name = 'Double command with time tag CP56Time2a'
+    __slots__ = ['sq', 'number', 'iolen', 'balanced']
+    fields_desc = [
+        IOA('IOA', 0x0000, check_balanced=lambda pkt: pkt.balanced),
+        BitEnumField('SE',0b0, 1, SE_ENUM),
+        BitField('QU', 0b00000, 5),
+        BitEnumField('DCS', 0b01, 2, DC_ENUM),
+        PacketField('time', CP56Time2a(), CP56Time2a)
+    ]
+
+    def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _iolen: int = 1, _number: Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
+        super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x3b], _number=_number, _balanced=_balanced, **fields)
+
+class IO60(IO):
+    name = 'Regulating step command with time tag CP56Time2a'
+    __slots__ = ['sq', 'number', 'iolen', 'balanced']
+    fields_desc = [
+        IOA('IOA', 0x0000, check_balanced=lambda pkt: pkt.balanced),
+        BitEnumField('SE', 0b0, 1, SE_ENUM),
+        BitField('QU', 0b00000, 5),
+        BitEnumField('RCS', 0b00, 2, RCS_ENUM),
+        PacketField('time', CP56Time2a(), CP56Time2a)
+    ]
+
+    def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _iolen: int = 1, _number: Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
+        super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x3c], _number=_number, _balanced=_balanced, **fields)
+
+class IO61(IO):
+    name = 'Set-point command with time tag CP56Time2a, normalized value'
+    __slots__ = ['sq', 'number', 'iolen', 'balanced']
+    fields_desc = [
+        IOA('IOA', 0x0000, check_balanced=lambda pkt: pkt.balanced),
+        NVA('NVA', 0x0000),
+        BitEnumField('SE', 0b0, 1, SE_ENUM),
+        BitField('QL', 0b0000000, 7),
+        PacketField('time', CP56Time2a(), CP56Time2a)
+    ]
+
+    def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _number : Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
+        super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x3d], _number=_number, _balanced=_balanced, **fields)
+
+class IO62(IO):
+    name = 'Set-point command with time tag CP56Time2a, scaled value'
+    __slots__ = ['sq', 'number', 'iolen', 'balanced']
+    fields_desc = [
+        IOA('IOA', 0x0000, check_balanced=lambda pkt: pkt.balanced),
+        LESignedShortField('SVA', 0x0000),
+        BitEnumField('SE', 0b0, 1, SE_ENUM),
+        BitField('QL', 0b0000000, 7),
+        PacketField('time', CP56Time2a(), CP56Time2a)
+    ]
+
+    def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _number : Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
+        super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x3e], _number=_number, _balanced=_balanced, **fields)
+
+class IO63(IO):
+    name = 'Set-point command with time tag CP56Time2a, short floating point number'
+    __slots__ = ['sq', 'number', 'iolen', 'balanced']
+    fields_desc = [
+        IOA('IOA', 0x0000, check_balanced=lambda pkt: pkt.balanced),
+        IEEEFloatField('value', 0.0),
+        BitEnumField('SE', 0b0, 1, SE_ENUM),
+        BitField('QL', 0b0000000, 7),
+        PacketField('time', CP56Time2a(), CP56Time2a)
+    ]
+
+    def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _number : Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
+        super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x3f], _number=_number, _balanced=_balanced, **fields)
+
+class IO64(IO):
+    name = 'Bitstring of 32 bit with time tag CP56Time2a'
+    __slots__ = ['sq', 'number', 'iolen', 'balanced']
+    fields_desc = [
+        IOA('IOA', 0x0000, check_balanced=lambda pkt: pkt.balanced),
+        XBitField('BSI', 0x00, 32),
+        PacketField('time', CP56Time2a(), CP56Time2a)
+    ]
+
+    def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _number : Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
+        super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x40], _number=_number, _balanced=_balanced, **fields)
+
 class IO70(IO):
     name = 'End of initialization'
     __slots__ = ['sq', 'number', 'iolen', 'balanced']
@@ -849,12 +946,7 @@ class IO102(IO):
     name  = 'Read command'
     __slots__ = ['sq', 'number', 'iolen', 'balanced']
     fields_desc = [
-        MultipleTypeField(
-            [
-                (XLEShortField('IOA', 0x0000), lambda pkt: 'balanced' in pkt.__slots__ and pkt.balanced)
-            ],
-            LEX3BytesField('IOA', 0x000000)
-        )
+        IOA('IOA', 0x0000, check_balanced=lambda pkt: pkt.balanced),
     ]
 
     def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _number : Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
@@ -903,6 +995,18 @@ class IO106(IO):
 
     def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _number : Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
         super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x6a], _number=_number, _balanced=_balanced, **fields)
+
+class IO107(IO):
+    name = 'Test command with time tag CP56Time2a'
+    __slots__ = ['sq', 'number', 'iolen', 'balanced']
+    fields_desc = [
+        IOA('IOA', 0x0000, check_balanced=lambda pkt: pkt.balanced),
+        LEShortField('TSC', 0x0000),
+        PacketField('time', CP56Time2a(), CP56Time2a)
+    ]
+
+    def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _number : Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
+        super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x6b], _number=_number, _balanced=_balanced, **fields)
 
 class IO110(IO):
     name = 'Parameter of measured values, normalized value'
@@ -1048,6 +1152,19 @@ class IO126(IO):
     def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _number : Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
         super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x7e], _number=_number, _balanced=_balanced, **fields)
 
+class IO127(IO):
+    name = 'QueryLog - Request archive file'
+    __slots__ = ['sq', 'number', 'iolen', 'balanced']
+    fields_desc = [
+        IOA('IOA', 0x0000, check_balanced=lambda pkt: pkt.balanced),
+        LEShortField('NOF', 0x0000),
+        PacketField('start_time', CP56Time2a(), CP56Time2a),
+        PacketField('stop_time', CP56Time2a(), CP56Time2a),
+    ]
+
+    def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, _sq: int = 0, _number : Optional[int] = None, _balanced: Optional[bool] = None, **fields: Any) -> None:
+        super().__init__(_pkt, post_transform, _internal, _underlayer, _sq, _iolen=IO_LEN[0x7f], _number=_number, _balanced=_balanced, **fields)
+
 class ASDU(Packet):
     name = 'ASDU'
     fields_desc = [
@@ -1107,6 +1224,13 @@ class ASDU(Packet):
                 (PacketField('IO', IO49(), IO49), lambda pkt: pkt.type == 0x31),
                 (PacketField('IO', IO50(), IO50), lambda pkt: pkt.type == 0x32),
                 (PacketField('IO', IO51(), IO51), lambda pkt: pkt.type == 0x33),
+                (PacketField('IO', IO58(), IO58), lambda pkt: pkt.type == 0x3a),
+                (PacketField('IO', IO59(), IO59), lambda pkt: pkt.type == 0x3b),
+                (PacketField('IO', IO60(), IO60), lambda pkt: pkt.type == 0x3c),
+                (PacketField('IO', IO61(), IO61), lambda pkt: pkt.type == 0x3d),
+                (PacketField('IO', IO62(), IO62), lambda pkt: pkt.type == 0x3e),
+                (PacketField('IO', IO63(), IO63), lambda pkt: pkt.type == 0x3f),
+                (PacketField('IO', IO64(), IO64), lambda pkt: pkt.type == 0x40),
                 (PacketField('IO', IO70(), IO70), lambda pkt: pkt.type == 0x46),
                 (PacketField('IO', IO100(), IO100), lambda pkt: pkt.type == 0x64),
                 (PacketField('IO', IO101(), IO101), lambda pkt: pkt.type == 0x65),
@@ -1115,6 +1239,7 @@ class ASDU(Packet):
                 (PacketField('IO', IO104(), IO104), lambda pkt: pkt.type == 0x68),
                 (PacketField('IO', IO105(), IO105), lambda pkt: pkt.type == 0x69),
                 (PacketField('IO', IO106(), IO106), lambda pkt: pkt.type == 0x6a),
+                (PacketField('IO', IO107(), IO107), lambda pkt: pkt.type == 0x6b),
                 (PacketField('IO', IO110(), IO110), lambda pkt: pkt.type == 0x6e),
                 (PacketField('IO', IO111(), IO111), lambda pkt: pkt.type == 0x6f),
                 (PacketField('IO', IO112(), IO112), lambda pkt: pkt.type == 0x70),
@@ -1126,6 +1251,7 @@ class ASDU(Packet):
                 (PacketField('IO', IO124(), IO124), lambda pkt: pkt.type == 0x7c),
                 (PacketField('IO', IO125(), IO125), lambda pkt: pkt.type == 0x7d),
                 (PacketField('IO', IO126(), IO126), lambda pkt: pkt.type == 0x7e),
+                (PacketField('IO', IO127(), IO127), lambda pkt: pkt.type == 0x7e),
             ],
             XStrField('IO', b'')
         ),
@@ -1138,7 +1264,7 @@ class ASDU(Packet):
             self.IO = nio
         return s
 
-# IEC-101 Packets (FT 1.2 Frame format)
+# IEC-101 Packets (FT 1.2 Frame format) [IEC-60870-5-101 A.1.2]
 # IEC-101 ASDU uses the balanced mode
 
 class FT12Fixed(Packet):

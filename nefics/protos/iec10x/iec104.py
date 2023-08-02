@@ -12,8 +12,11 @@ from nefics.protos.iec10x.packets import *
 from nefics.protos.iec10x.enums import ALLOWED_COT
 from nefics.protos.iec10x.util import time56
 
-MAX_LENGTH = 260 # APCI -> 5, MAX ASDU -> 255
-MAX_QUEUE  = 256
+MAX_LENGTH : int           = 260   # APCI -> 5, MAX ASDU -> 255
+MAX_QUEUE : int            = 256
+DATATR_WAIT : float        = 0.40
+ICMD_WAIT : float          = 0.10
+SUPPORTED_ASDU : list[int] = [45, 46, 49, 58, 59, 62, 100, 102, 105]
 
 # Definition of timeouts (IEC60870-5-104 section 9.6)
 TIMEOUT_T0 = 30
@@ -105,9 +108,9 @@ class IEC104Handler(Thread):
                         asdu_type = 0x1e # single-point information with time tag CP56Time2a
                         io = IO30(_sq=0, _number=1, _balanced=False, IOA=addr, SIQ=value, time=time56())
                     else: # Measured value
-                        value = device.read_ieee_float(addr)
-                        asdu_type = 0x24 # measured value, short floating point number with time tag CP56Time2a
-                        io = IO36(_sq=0, _number=1, _balanced=False, IOA=addr, value=value, time=time56())
+                        value = device.read_word(addr)
+                        asdu_type = 0x23 # Measured value, scaled value with time tag CP56Time2a
+                        io = IO35(_sq=0, _number=1, _balanced=False, IOA=addr, SVA=value, time=time56())
                     apdu /= ASDU(
                         type=asdu_type, 
                         VSQ=VSQ(SQ=0, number=1),
@@ -116,7 +119,7 @@ class IEC104Handler(Thread):
                         IO=[io]
                     )
                     self._send_queue.put(APDU(apdu.build()))
-                    sleep(0.40)
+                    sleep(min(DATATR_WAIT, TIMEOUT_T2/len(self._mem_map)))
             except BrokenPipeError:
                 alive = False
 
@@ -149,14 +152,54 @@ class IEC104Handler(Thread):
     def _frame_sender(self):
         alive : bool = True
         sock = self._sock
+        state = self._state
         while alive and not self.terminate:
             try:
                 if not self._send_queue.empty():
                     next_apdu : APDU = self._send_queue.get(block=False)
                     sock.send(next_apdu.build())
                     self.tx += 1
+                elif self._send_queue.empty() and state == ControlledState.PENDING:
+                    state = ControlledState.STOPPED
+                else:
+                    sleep(DATATR_WAIT)
             except (BrokenPipeError, TimeoutError):
                 alive = False
+
+    def _unknown_parameter(self, apdu : APDU, cot : int):
+        # Respond with specific CoT
+        asdu : ASDU = apdu['ASDU']
+        rasdu : ASDU = ASDU(type=asdu.type, VSQ=asdu.VSQ, COT_flags=0b01, COT=cot, CommonAddress=asdu.CommonAddress, IO=asdu.IO)
+        self._send_queue.put(APDU()/APCI(type=0x00, Rx=self.rx, Tx=self.tx)/rasdu, block=True, timeout=TIMEOUT_T2)
+
+    def _handle_iframe(self, apdu : APDU):
+        asdu : ASDU = apdu['ASDU']
+        atype : int = asdu.type
+        cot : int = asdu.COT
+        device = self._device
+        oio = asdu.IO
+        if atype == 100 and cot == 6 : # Interrogation command (act)
+            # Add IC (actcon) to the message queue
+            rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=7, CommonAddress=self.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
+            self._send_queue.put(APDU()/APCI(type=0x00, Rx=self.rx, Tx=self.tx)/rasdu, block=True, timeout=TIMEOUT_T2)
+            sleep(ICMD_WAIT)
+            # Add process information
+            for addr in self._mem_map:
+                asdu_type : int
+                if addr < 0x20000: # Boolean value
+                    value = 0x01 if device.read_bool(addr) else 0x00 # Determine SPI
+                    asdu_type = 0x1e # single-point information with time tag CP56Time2a
+                    io = IO1(_sq=0, _number=1, _balanced=False, IOA=addr, SIQ=value)
+                else: # Measured value
+                    value = device.read_word(addr)
+                    asdu_type = 0x0b # Measured value, scaled value with time tag CP56Time2a
+                    io = IO11(_sq=0, _number=1, _balanced=False, IOA=addr, value=ScaledValue(SVA=value), time=time56())
+                rasdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT=0x14, CommonAddress=device.guid & 0xFF, IO=[io])
+                self._send_queue.put(APDU()/APCI(type=0x00, Rx=self.rx, Tx=self.tx)/rasdu, block=True, timeout=TIMEOUT_T2)
+                sleep(min(ICMD_WAIT, TIMEOUT_T2/len(self._mem_map)))
+            # Add IC (actterm) to the message queue
+            rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=10, CommonAddress=self.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
+            self._send_queue.put(APDU()/APCI(type=0x00, Rx=self.rx, Tx=self.tx)/rasdu, block=True, timeout=TIMEOUT_T2)
 
     def run(self):
         state = self._state
@@ -169,7 +212,7 @@ class IEC104Handler(Thread):
         while not self.terminate:
             try:
                 if self._recv_queue.empty():
-                    sleep(TIMEOUT_T2)
+                    sleep(DATATR_WAIT)
                 else:
                     buffer = self._recv_queue.get(block=False)
                     apci = buffer['APCI']
@@ -177,16 +220,45 @@ class IEC104Handler(Thread):
                         if apci.type == 0x03: # Received a U-frame
                             utype = apci.UType
                             self._send_queue.put(APDU()/APCI(type=0x03, UType=(utype << 1)))
-                            if utype == 0x01:
+                            if utype == 0x01: # STARTDT
                                 state = ControlledState.STARTED
                                 datatr = Thread(target=self._data_transfer)
                                 datatr.start()
                         else:
                             self.terminate = True
                     elif state == ControlledState.STARTED:
-                        sleep(TIMEOUT_T1)
+                        if apci.type == 0x00: # I-frame
+                            asdu : ASDU = apci['ASDU']
+                            io = asdu.IO
+                            if asdu.CommonAddress != self._device.guid: # Common address mismatch
+                                # Respond with CoT 46 (unknown common address of ASDU)
+                                self._unknown_parameter(buffer, 46)
+                            elif asdu.type not in TYPEID_ASDU.keys() or asdu.type not in SUPPORTED_ASDU: # Unknown ASDU type
+                                # Respond with CoT 44 (unknown type identification)
+                                self._unknown_parameter(buffer, 44)
+                            elif ALLOWED_COT[asdu.type] & (2 ** (asdu.COT - 1)) == 0: # COT not allowed for that ASDU type
+                                # Respond with CoT 45 (unknown type cause of transmission)
+                                self._unknown_parameter(buffer, 45)
+                            elif (asdu.type == 100 and io.IOA != 0) or (asdu.type != 100 and ((isinstance(io, IO) and io.IOA not in self._mem_map) or (isinstance(io, list) and any(x.IOA not in self._mem_map for x in io)))): # Chek for valid IOAs
+                                # Respond with CoT 47 (unknown information object address)
+                                self._unknown_parameter(buffer, 47)
+                            else:
+                                # Handle supported I-frame
+                                self._handle_iframe(buffer)
+                        elif apci.type == 0x01: # S-frame
+                            continue # Synchronization handled by the receiver. Do nothing.
+                        else: # U-frame
+                            utype = apci.UType
+                            self._send_queue.put(APDU()/APCI(type=0x03, UType=(utype << 1)))
+                            if utype == 0x04: # STOPDT
+                                if self._send_queue.empty() and self._recv_queue.empty():
+                                    state = ControlledState.STOPPED
+                                else:
+                                    state = ControlledState.PENDING
+                                datatr.join()
+                                datatr = None
                     else:
-                        sleep(TIMEOUT_T1)
+                        sleep(DATATR_WAIT)
             except AssertionError as e:
                 stderr.write(f'ERROR :: {str(e)}\r\n')
                 stderr.flush()

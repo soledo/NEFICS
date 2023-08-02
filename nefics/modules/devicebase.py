@@ -8,7 +8,7 @@ from netifaces import gateways, ifaddresses
 from netaddr import valid_ipv4, IPNetwork
 from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, SO_REUSEADDR, SO_BROADCAST, SOL_SOCKET, timeout
 from threading import Thread
-from collections import deque
+from queue import Queue
 from datetime import datetime
 from time import sleep
 from struct import pack, unpack
@@ -77,8 +77,8 @@ class IEDBase(Thread):
         self._sock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)                              # Enable broadcast
         self._sock.bind(('', simproto.SIM_PORT))                                        # Bind to simulation port on all addresses
         self._sock.settimeout(0.333)                                                    # Set socket timeout (seconds)
-        self._msgqueue = deque(maxlen=simproto.QUEUE_SIZE//simproto.DATA_LEN)           # Simulation message queue (64KB)
-        self._mem_wr_queue : deque[tuple[function, int, int | bool | float]] = deque()  # Device memory write request queue
+        self._msgqueue = Queue(maxsize=simproto.QUEUE_SIZE//simproto.DATA_LEN)          # Simulation message queue (64KB)
+        self._mem_wr_queue : Queue[tuple[function, int, int | bool | float]] = Queue()  # Device memory write request queue
         device_identification_values = ['vname', 'pcode', 'rev', 'dname', 'model']
         if 'info' in kwargs.keys() and isinstance(kwargs['info'], dict) and all(isinstance(y, str) for x in kwargs['info'].items() for y in x) and all(str(x).lower() in device_identification_values for x in kwargs['info'].keys()):
             # Custom device identification information
@@ -172,7 +172,7 @@ class IEDBase(Thread):
         '''Queue a write request for a boolean value in a given address'''
         assert address <= 0x3FFFF and address >= 0x00000
         assert all(a in self._memory.keys() for a in [address, address + 1])
-        self._mem_wr_queue.append((self._write_bool, address, value))
+        self._mem_wr_queue.put((self._write_bool, address, value))
     
     def _write_word(self, address : int, value: int):
         '''Write a Little-Endian WORD representation of the stored value in [address, address + 1] bytes'''
@@ -187,7 +187,7 @@ class IEDBase(Thread):
         assert address <= 0x3FFFF and address >= 0x00000
         assert value >= 0x0000 and value <= 0xFFFF
         assert all(a in self._memory.keys() for a in [address, address + 1])
-        self._mem_wr_queue.append((self._write_word, address, value))
+        self._mem_wr_queue.put((self._write_word, address, value))
     
     def _write_ieee_float(self, address : int, value: float):
         '''Write an IEEE 754 half-precision 16-bit float float representation of the stored value in [address, address + 1] bytes'''
@@ -201,13 +201,13 @@ class IEDBase(Thread):
         '''Queue a write request for an IEEE 754 half-precision 16-bit float value in a given address'''
         assert address <= 0x3FFFF and address >= 0x00000
         assert all(a in self._memory.keys() for a in [address, address + 1])
-        self._mem_wr_queue.append((self._write_ieee_float, address, value))
+        self._mem_wr_queue.put((self._write_ieee_float, address, value))
     
     def _memory_writer(self):
         '''Process memory write requests'''
         while not self._terminate:
-            if self._mem_wr_queue:
-                wr_request : tuple[function, int, bool | int | float] = self._mem_wr_queue.popleft()
+            if not self._mem_wr_queue.empty():
+                wr_request : tuple[function, int, bool | int | float] = self._mem_wr_queue.get()
                 try:
                     wr_request[0](wr_request[1], wr_request[2])
                 except AssertionError:
@@ -274,10 +274,10 @@ class IEDBase(Thread):
         messages might not be meant for this device.
         '''
         while not self._terminate:
-            if len(self._msgqueue) > 0:
-                next_msg = self._msgqueue.popleft()
+            if not self._msgqueue.empty():
+                next_msg : list = self._msgqueue.get()
                 m_addr = next_msg[0]
-                next_msg = next_msg[1]
+                next_msg : simproto.NEFICSMSG = next_msg[1]
                 if next_msg.ReceiverID == self.guid:
                     if next_msg.MessageID == simproto.MESSAGE_ID['MSG_WERE']:
                         pkt = simproto.NEFICSMSG(
@@ -343,7 +343,7 @@ class IEDBase(Thread):
             try:
                 msgdata, msgfrom = self._sock.recvfrom(BUFFER_SIZE)
                 msgdata = simproto.NEFICSMSG(msgdata)
-                self._msgqueue.append([msgfrom, msgdata])
+                self._msgqueue.put([msgfrom, msgdata])
             except timeout:
                 pass
         memwriter.join()
