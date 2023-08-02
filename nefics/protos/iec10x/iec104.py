@@ -188,11 +188,11 @@ class IEC104Handler(Thread):
                 asdu_type : int
                 if addr < 0x20000: # Boolean value
                     value = 0x01 if device.read_bool(addr) else 0x00 # Determine SPI
-                    asdu_type = 0x1e # single-point information with time tag CP56Time2a
+                    asdu_type = 0x01 # single-point information
                     io = IO1(_sq=0, _number=1, _balanced=False, IOA=addr, SIQ=value)
                 else: # Measured value
                     value = device.read_word(addr)
-                    asdu_type = 0x0b # Measured value, scaled value with time tag CP56Time2a
+                    asdu_type = 0x0b # Measured value, scaled value
                     io = IO11(_sq=0, _number=1, _balanced=False, IOA=addr, value=ScaledValue(SVA=value), time=time56())
                 rasdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT=0x14, CommonAddress=device.guid & 0xFF, IO=[io])
                 self._send_queue.put(APDU()/APCI(type=0x00, Rx=self.rx, Tx=self.tx)/rasdu, block=True, timeout=TIMEOUT_T2)
