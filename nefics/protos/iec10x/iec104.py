@@ -6,6 +6,7 @@ from threading import Thread
 from socket import socket
 from queue import Queue, Full
 from time import sleep
+from typing import Union, Optional
 
 from nefics.modules.devicebase import IEDBase
 from nefics.protos.iec10x.packets import *
@@ -16,7 +17,7 @@ MAX_LENGTH : int           = 260   # APCI -> 5, MAX ASDU -> 255
 MAX_QUEUE : int            = 256
 DATATR_WAIT : float        = 0.40
 ICMD_WAIT : float          = 0.10
-SUPPORTED_ASDU : list[int] = [45, 46, 49, 58, 59, 62, 100, 102, 105]
+SUPPORTED_ASDU : list[int] = [45, 46, 49, 58, 59, 62, 100, 102]
 
 # Definition of timeouts (IEC60870-5-104 section 9.6)
 TIMEOUT_T0 = 30
@@ -40,6 +41,7 @@ class IEC104Handler(Thread):
         self._tx : int = 0
         self._rx : int = 0
         self._mem_map : list[int] = list()
+        self._selected_for_operation : Optional[int] = None # IOA for SBO scheme
         self._recv_queue : Queue[APDU] = Queue(maxsize=MAX_QUEUE)
         self._send_queue : Queue[APDU] = Queue(maxsize=MAX_QUEUE)
         self._validate_memory()
@@ -101,7 +103,7 @@ class IEC104Handler(Thread):
                 sleep(TIMEOUT_T2)
                 for addr in self._mem_map:
                     apdu : APDU = APDU()
-                    apdu /= APCI(type=0x00, Rx=self.rx, Tx=self.tx)
+                    apdu /= APCI(type=0x00)
                     asdu_type : int
                     if addr < 0x20000: # Boolean value
                         value = 0x01 if device.read_bool(addr) else 0x00 # Determine SPI
@@ -157,6 +159,10 @@ class IEC104Handler(Thread):
             try:
                 if not self._send_queue.empty():
                     next_apdu : APDU = self._send_queue.get(block=False)
+                    if next_apdu['APCI'].type < 3:
+                        next_apdu['APCI'].Rx = self.rx
+                    if next_apdu['APCI'].type == 0:
+                        next_apdu['APCI'].Tx = self.tx
                     sock.send(next_apdu.build())
                     self.tx += 1
                 elif self._send_queue.empty() and state == ControlledState.PENDING:
@@ -170,36 +176,187 @@ class IEC104Handler(Thread):
         # Respond with specific CoT
         asdu : ASDU = apdu['ASDU']
         rasdu : ASDU = ASDU(type=asdu.type, VSQ=asdu.VSQ, COT_flags=0b01, COT=cot, CommonAddress=asdu.CommonAddress, IO=asdu.IO)
-        self._send_queue.put(APDU()/APCI(type=0x00, Rx=self.rx, Tx=self.tx)/rasdu, block=True, timeout=TIMEOUT_T2)
+        self._send_queue.put(APDU()/APCI(type=0x00)/rasdu, block=True, timeout=TIMEOUT_T2)
+
+    def _handle_IO45_IO58(self, apdu : APDU):
+        'Handle C_SC_NA_1 (Single command) and C_SC_TA_1 (Single command with time tag CP56Time2a)'
+        select : bool = apdu['ASDU'].IO.SE == 0b1
+        scs : bool = apdu['ASDU'].IO.SCS == 0b1
+        ioa : int = apdu['ASDU'].IO.IOA
+        cot : int
+        atype : int
+        vsq : VSQ = VSQ(SQ=0, number=1)
+        currtime : CP56Time2a = time56()
+        cot_flags : int
+        if select: # SELECT
+            if self._selected_for_operation is not None or ioa < 0x10000 or ioa >= 0x20000:
+                # Check if:
+                # - there is a previously selected object for operation
+                # - IOA is not in the boolean read-write memory region [0x10000-0x1FFFF]
+                cot_flags = 0b01
+                cot = 10 # ActTerm
+            else:
+                cot_flags = 0b00
+                cot = 7 # ActCon
+                self._selected_for_operation = int(ioa)
+        else: # EXECUTE
+            if self._selected_for_operation == int(ioa):
+                # Correct IOA for operation
+                self._device.write_bool(ioa, scs)
+                cot_flags = 0b00
+                cot = 7 # ActCon
+            else:
+                cot_flags = 0b01
+                cot = 10 # ActTerm
+            self._selected_for_operation = None
+        if isinstance(apdu['ASDU'].IO, IO45):
+            io = IO45(_sq=0, _number=1, _balanced=False, IOA=ioa, SE=int(select), SCS=int(scs))
+            atype = 0x2d
+        else:
+            io = IO58(_sq=0, _number=1, _balanced=False, IOA=ioa, SE=int(select), SCS=int(scs), time=currtime)
+            atype = 0x3a
+        asdu = ASDU(type=atype, VSQ=vsq, COT_flags=cot_flags, COT=cot, CommonAddress=self._device.guid, IO=io)
+        self._send_queue.put(APDU()/APCI(type=0x00)/asdu)
+
+    def _handle_IO46_IO59(self, apdu : APDU):
+        'Handle C_DC_NA_1 (Double command) and C_DC_TA_1 (Double command with time tag CP56Time2a)'
+        select : bool = apdu['ASDU'].IO.SE == 0b1
+        dcs : int = apdu['ASDU'].IO.DCS & 0b11
+        ioa : int = apdu['ASDU'].IO.IOA
+        cot : int
+        atype : int
+        vsq : VSQ = VSQ(SQ=0, number=1)
+        currtime : CP56Time2a = time56()
+        cot_flags : int
+        if dcs in [0, 3]: # DCS not permitted
+            cot_flags = 0b01 # Negative
+            cot = 10 # ActTerm
+        else:
+            if select: # SELECT
+                if self._selected_for_operation is not None or ioa < 0x10000 or ioa >= 0x20000:
+                    # Check if:
+                    # - there is a previously selected object for operation
+                    # - IOA is not in the boolean read-write memory region [0x10000-0x1FFFF]
+                    cot_flags = 0b01 # Negative
+                    cot = 10 # ActTerm
+                else:
+                    cot_flags = 0b00
+                    cot = 7 # ActCon
+                    self._selected_for_operation = int(ioa)
+            else: # EXECUTE
+                if self._selected_for_operation == int(ioa):
+                    # Correct IOA for operation
+                    self._device.write_bool(ioa, dcs == 2)
+                    cot_flags = 0b00
+                    cot = 7 # ActCon
+                else:
+                    cot_flags = 0b01 # Negative
+                    cot = 10 # ActTerm
+                self._selected_for_operation = None
+        if isinstance(apdu['ASDU'].IO, IO46):
+            io = IO46(_sq=0, _number=1, _balanced=False, IOA=ioa, SE=int(select), DCS=dcs)
+            atype = 0x2e
+        else:
+            io = IO59(_sq=0, _number=1, _balanced=False, IOA=ioa, SE=int(select), DCS=dcs, time=currtime)
+            atype = 0x3b
+        asdu = ASDU(type=atype, VSQ=vsq, COT_flags=cot_flags, COT=cot, CommonAddress=self._device.guid, IO=io)
+        self._send_queue.put(APDU()/APCI(type=0x00)/asdu)
+
+    def _handle_IO49_IO62(self, apdu : APDU):
+        'Handle C_SE_NB_1 (Set-point command, scaled value) and C_SE_TB_1 (Set point command, scaled value with time tag CP56Time2a)'
+        select : bool = apdu['ASDU'].IO.SE == 0b1
+        value : int = apdu['ASDU'].IO.SVA & 0xFFFF
+        ioa : int = apdu['ASDU'].IO.IOA
+        cot : int
+        atype : int
+        vsq : VSQ = VSQ(SQ=0, number=1)
+        currtime : CP56Time2a = time56()
+        cot_flags : int
+        if select: # SELECT
+            if self._selected_for_operation is not None or ioa < 0x30000 or ioa >= 0x3FFFF:
+                # Check if:
+                # - there is a previously selected object for operation
+                # - IOA is not in the WORD read-write memory region [0x30000-0x3FFFE]
+                cot_flags = 0b01 # Negative
+                cot = 10 # ActTerm
+            else:
+                cot_flags = 0b00
+                cot = 7 # ActCon
+                self._selected_for_operation = int(ioa)
+        else: # EXECUTE
+            if self._selected_for_operation == int(ioa):
+                # Correct IOA for operation
+                self._device.write_word(ioa, value)
+                cot_flags = 0b00
+                cot = 7 # ActCon
+            else:
+                cot_flags = 0b01
+                cot = 10 # ActTerm
+            self._selected_for_operation = None
+        if isinstance(apdu['ASDU'].IO, IO49):
+            io = IO49(_sq=0, _number=1, _balanced=False, IOA=ioa, SVA=value, SE=int(select))
+            atype=0x31
+        else:
+            io = IO62(_sq=0, _number=1, _balanced=False, IOA=ioa, SVA=value, SE=int(select), time=currtime)
+        asdu = ASDU(type=atype, VSQ=vsq, COT_flags=cot_flags, COT=cot, CommonAddress=self._device.guid, IO=io)
+        self._send_queue.put(APDU()/APCI(type=0x00)/asdu)
+
+    def _handle_IO100(self, apdu : APDU):
+        'Handle C_IC_NA_1 (Interrogation Command)'
+        device = self._device
+        asdu : ASDU = apdu['ASDU']
+        oio = asdu.IO
+        # Add IC (actcon) to the message queue
+        rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=7, CommonAddress=self.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
+        self._send_queue.put(APDU()/APCI(type=0x00)/rasdu, block=True, timeout=TIMEOUT_T2)
+        sleep(ICMD_WAIT)
+        # Add process information
+        for addr in self._mem_map:
+            asdu_type : int
+            if addr < 0x20000: # Boolean value
+                value = 0x01 if device.read_bool(addr) else 0x00 # Determine SPI
+                asdu_type = 0x01 # single-point information
+                io = IO1(_sq=0, _number=1, _balanced=False, IOA=addr, SIQ=value)
+            else: # Measured value
+                value = device.read_word(addr)
+                asdu_type = 0x0b # Measured value, scaled value
+                io = IO11(_sq=0, _number=1, _balanced=False, IOA=addr, value=ScaledValue(SVA=value), time=time56())
+            rasdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT=0x14, CommonAddress=device.guid & 0xFF, IO=[io])
+            self._send_queue.put(APDU()/APCI(type=0x00)/rasdu, block=True, timeout=TIMEOUT_T2)
+            sleep(min(ICMD_WAIT, TIMEOUT_T2/len(self._mem_map)))
+        # Add IC (actterm) to the message queue
+        rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=10, CommonAddress=self.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
+        self._send_queue.put(APDU()/APCI(type=0x00)/rasdu, block=True, timeout=TIMEOUT_T2)
+
+    def _handle_IO102(self, apdu : APDU):
+        'Handle C_RD_NA_1 (Read command)'
+        req_addr = apdu['ASDU'].IO.IOA
+        device = self._device
+        asdu_type : int
+        if req_addr < 0x20000: # Boolean value
+            value = 0x01 if device.read_bool(req_addr) else 0x00
+            asdu_type = 0x1e # Single-point information with time tag CP56Time2a
+            io = IO30(_sq=0, _number=1, _balanced=False, IOA=req_addr, SIQ=value, time=time56())
+        else: # Measured value
+            value = device.read_word(req_addr)
+            asdu_type = 0x23 # Measured value, scaled value with time tag CP56Time2a
+            io = IO35(_sq=0, _number=1, _balanced=False, IOA=req_addr, SVA=value, time=time56())
+        res_asdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=5, CommonAddress=device.guid & 0xFF, IO=io)
+        self._send_queue.put(APDU()/APCI(type=0x00)/res_asdu, block=True, timeout=TIMEOUT_T2)
 
     def _handle_iframe(self, apdu : APDU):
-        asdu : ASDU = apdu['ASDU']
-        atype : int = asdu.type
-        cot : int = asdu.COT
-        device = self._device
-        oio = asdu.IO
-        if atype == 100 and cot == 6 : # Interrogation command (act)
-            # Add IC (actcon) to the message queue
-            rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=7, CommonAddress=self.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
-            self._send_queue.put(APDU()/APCI(type=0x00, Rx=self.rx, Tx=self.tx)/rasdu, block=True, timeout=TIMEOUT_T2)
-            sleep(ICMD_WAIT)
-            # Add process information
-            for addr in self._mem_map:
-                asdu_type : int
-                if addr < 0x20000: # Boolean value
-                    value = 0x01 if device.read_bool(addr) else 0x00 # Determine SPI
-                    asdu_type = 0x01 # single-point information
-                    io = IO1(_sq=0, _number=1, _balanced=False, IOA=addr, SIQ=value)
-                else: # Measured value
-                    value = device.read_word(addr)
-                    asdu_type = 0x0b # Measured value, scaled value
-                    io = IO11(_sq=0, _number=1, _balanced=False, IOA=addr, value=ScaledValue(SVA=value), time=time56())
-                rasdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT=0x14, CommonAddress=device.guid & 0xFF, IO=[io])
-                self._send_queue.put(APDU()/APCI(type=0x00, Rx=self.rx, Tx=self.tx)/rasdu, block=True, timeout=TIMEOUT_T2)
-                sleep(min(ICMD_WAIT, TIMEOUT_T2/len(self._mem_map)))
-            # Add IC (actterm) to the message queue
-            rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=10, CommonAddress=self.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
-            self._send_queue.put(APDU()/APCI(type=0x00, Rx=self.rx, Tx=self.tx)/rasdu, block=True, timeout=TIMEOUT_T2)
+        atype : int = apdu['ASDU'].type
+        cot : int = apdu['ASDU'].COT
+        iframe_handlers : dict[tuple, function] = {
+            (45, 6) : self._handle_IO45_IO58, # Single command (Act)
+            (46 ,6) : self._handle_IO46_IO59, # Double command (Act)
+            (58, 6) : self._handle_IO45_IO58, # Single command with time tag CP56Time2a (Act)
+            (59, 6) : self._handle_IO46_IO59, # Double command with time tag CP56Time2a (Act)
+            (100, 6) : self._handle_IO100, # Interrogation command (Act)
+            (102, 5) : self._handle_IO102, # Read command (req)
+        }
+        if (atype, cot) in iframe_handlers.keys(): 
+            iframe_handlers[(atype, cot)](apdu)
 
     def run(self):
         state = self._state
