@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 
+import typing
 from sys import stderr
 from enum import Enum
 from threading import Thread
-from socket import socket
+from socket import socket, AF_INET, SOCK_STREAM, IPPROTO_TCP
 from queue import Queue, Full
 from time import sleep
-from typing import Union, Optional
+from cmd import Cmd
+from typing import Optional, Union
 
 from nefics.modules.devicebase import IEDBase
 from nefics.protos.iec10x.packets import *
@@ -350,8 +352,10 @@ class IEC104Handler(Thread):
         iframe_handlers : dict[tuple, function] = {
             (45, 6) : self._handle_IO45_IO58, # Single command (Act)
             (46 ,6) : self._handle_IO46_IO59, # Double command (Act)
+            (49, 6) : self._handle_IO49_IO62, # Set-point command, scaled value (Act)
             (58, 6) : self._handle_IO45_IO58, # Single command with time tag CP56Time2a (Act)
             (59, 6) : self._handle_IO46_IO59, # Double command with time tag CP56Time2a (Act)
+            (62, 6) : self._handle_IO49_IO62, # Set-point command, scaled value with time tag CP56Time2a (Act)
             (100, 6) : self._handle_IO100, # Interrogation command (Act)
             (102, 5) : self._handle_IO102, # Read command (req)
         }
@@ -425,4 +429,57 @@ class IEC104Handler(Thread):
         sender.join()
         self._sock.close()
         
+class IEC104CLI(Cmd):
+    prompt = '[IEC-104]> '
+
+    def __init__(self, completekey: str = ..., stdin: typing.IO[str] | None = ..., stdout: typing.IO[str] | None = ...) -> None:
+        super().__init__(completekey, stdin, stdout)
+        self._sock : socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        self._device_map : dict[int, Union[int, bool]] = dict()
+        self._rth : Thread
+        self._end_recv : bool = True
+        self._req_apdu : Union[APDU, None] = None
+
+    def _map_io(self, io):
+        addr : int = io.IOA
+        value : Union[bool, int, None] = None
+        if isinstance(io, IO30):
+            value = bool(io.SIQ & 0b1)
+        elif isinstance(io, IO35):
+            value = io.SVA
+        if value is not None:
+            self._device_map[addr] = value
+
+    def _receiver(self):
+        alive : bool = True
+        sock = self._sock
+        while alive and not self._end_recv:
+            try:
+                buffer = sock.recv(MAX_LENGTH)
+                apdu : APDU = APDU(buffer)
+                assert apdu.haslayer('ASDU'), f'Received unknown data: {buffer}\r\n'
+                asdu = apdu['ASDU']
+                if asdu.COT == 5: # Requested
+                    self._req_apdu = APDU(apdu.build())
+                else:
+                    io = asdu.IO
+                    if issubclass(io.__class__, IO):
+                        self._map_io(io)
+                    elif isinstance(io, list) and all(issubclass(x.__class__, IO) for x in io):
+                        for x in io:
+                            self._map_io(x)
+            except AssertionError as e:
+                stderr.write(e)
+                stderr.flush()
+            except BrokenPipeError:
+                alive = False
+            except TimeoutError:
+                self._end_recv = True
+        sock.close()
     
+    def do_disconnect(self, arg):
+        self._end_recv = True
+        if self._rth.is_alive():
+            self._rth.join()
+        self._sock.close()
+        
