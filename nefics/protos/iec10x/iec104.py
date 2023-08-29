@@ -4,17 +4,19 @@ import typing
 from sys import stderr
 from enum import Enum
 from threading import Thread
-from socket import socket, AF_INET, SOCK_STREAM, IPPROTO_TCP
+from socket import socket, AF_INET, SOCK_STREAM, IPPROTO_TCP, SOL_SOCKET, SO_ERROR, SHUT_RDWR
 from queue import Queue, Full
 from time import sleep
 from cmd import Cmd
 from typing import Optional, Union
+from netaddr import valid_ipv4
 
 from nefics.modules.devicebase import IEDBase
 from nefics.protos.iec10x.packets import *
 from nefics.protos.iec10x.enums import ALLOWED_COT
 from nefics.protos.iec10x.util import time56
 
+IEC104_PORT : int          = 2404
 MAX_LENGTH : int           = 260   # APCI -> 5, MAX ASDU -> 255
 MAX_QUEUE : int            = 256
 DATATR_WAIT : float        = 0.40
@@ -439,6 +441,9 @@ class IEC104CLI(Cmd):
         self._rth : Thread
         self._end_recv : bool = True
         self._req_apdu : Union[APDU, None] = None
+        self._tx : int
+        self._rx : int
+        self._tx_queue : Queue[APDU] = Queue(maxsize=MAX_QUEUE)
 
     def _map_io(self, io):
         addr : int = io.IOA
@@ -459,6 +464,7 @@ class IEC104CLI(Cmd):
                 apdu : APDU = APDU(buffer)
                 assert apdu.haslayer('ASDU'), f'Received unknown data: {buffer}\r\n'
                 asdu = apdu['ASDU']
+                self._rx += 1
                 if asdu.COT == 5: # Requested
                     self._req_apdu = APDU(apdu.build())
                 else:
@@ -475,11 +481,43 @@ class IEC104CLI(Cmd):
                 alive = False
             except TimeoutError:
                 self._end_recv = True
-        sock.close()
+    
+    def _sender(self):
+        # TODO: APDU Sender thread
+        pass
     
     def do_disconnect(self, arg):
         self._end_recv = True
         if self._rth.is_alive():
             self._rth.join()
+        self._sock.shutdown(SHUT_RDWR)
         self._sock.close()
+    
+    def do_connect(self, arg : str):
+        sock = self._sock
+        try:
+            assert len(arg) > 7, f'{arg} is too short to contain an IPv4 address\r\n'
+            arg = arg.split()
+            addr = arg[0]
+            assert valid_ipv4(addr), f'{addr} is not a valid IPv4 address\r\n'
+            port = arg[1] if len(arg) > 1 else IEC104_PORT
+            try:
+                sock.getsockopt(SOL_SOCKET, SO_ERROR)
+                # If no OSError, the socket is already connected
+                print(f'Already connected to: {str(sock.getpeername())}')
+            except OSError:
+                # Not connected
+                sock.connect((addr, port))
+                sock.settimeout(TIMEOUT_T1)
+                self._rx = 0
+                self._tx = 0
+                print(f'Connected to: {str(sock.getpeername())}')
+                print(f'Starting recevier thread ...')
+                self._rth = Thread(target=self._receiver)
+                self._rth.start()
+                print(f'Starting data transmission ...')
+
+        except AssertionError as e:
+            stderr.write(str(e))
+            stderr.flush()
         
