@@ -199,13 +199,13 @@ class IO(Packet):
         if _balanced:
             self.balanced : bool = _balanced
             if len(_pkt):
-                self.number : int = (len(_pkt) - 2) // self.iolen if self.iolen > 0 else 0
+                self.number : Optional[int] = (len(_pkt) - 2) // self.iolen if self.iolen > 0 else 0
             else:
                 self.number : Optional[int] = _number
         elif _balanced is not None:
             self.balanced : bool = _balanced
             if len(_pkt):
-                self.number : int = (len(_pkt) - 3) // self.iolen if self.iolen > 0 else 0
+                self.number : Optional[int] = (len(_pkt) - 3) // self.iolen if self.iolen > 0 else 0
             else:
                 self.number : Optional[int] = _number
         else:
@@ -216,12 +216,12 @@ class IO(Packet):
                     else:
                         self.balanced : bool = len(_pkt) - 2 > 0 and (float(len(_pkt) - 2)/float(_iolen)).is_integer() if _sq == 1 else (float(len(_pkt))/float(_iolen + 2)).is_integer()
                     if self.balanced:
-                        self.number : int = (len(_pkt) - 2) // _iolen if _sq == 1 else len(_pkt) // (_iolen + 2)
+                        self.number : Optional[int] = (len(_pkt) - 2) // _iolen if _sq == 1 else len(_pkt) // (_iolen + 2)
                     else:                        
-                        self.number : int = (len(_pkt) - 3) // _iolen if _sq == 1 else len(_pkt) // (_iolen + 3)
+                        self.number : Optional[int] = (len(_pkt) - 3) // _iolen if _sq == 1 else len(_pkt) // (_iolen + 3)
                 else:
                     self.balanced : bool = len(_pkt) % 2 == 0
-                    self.number : int = len(_pkt) // 2 if self.balanced else len(_pkt) // 3
+                    self.number : Optional[int] = len(_pkt) // 2 if self.balanced else len(_pkt) // 3
             else:
                 self.balanced : bool = True
                 self.number : Optional[int] = _number
@@ -1385,7 +1385,8 @@ class APDU(Packet):
 
     def __init__(self, _pkt: bytes = b"", post_transform: Any = None, _internal: int = 0, _underlayer: Optional[Packet] = None, **fields: Any) -> None:
         super().__init__(_pkt, post_transform, _internal, _underlayer, **fields)
-    def dissect(self, s):
+    
+    def dissect(self, s : bytes):
         s = self.pre_dissect(s)
         s = self.do_dissect(s)
         s = self.post_dissect(s)
@@ -1400,3 +1401,4 @@ class APDU(Packet):
     def do_dissect(self, s):
         apci = APCI(s, _internal=1, _underlayer=self)
         self.add_payload(apci)
+        return s[len(apci.build()):]

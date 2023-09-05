@@ -10,6 +10,7 @@ from time import sleep
 from cmd import Cmd
 from typing import Optional, Union
 from netaddr import valid_ipv4
+from datetime import datetime
 
 from nefics.modules.devicebase import IEDBase
 from nefics.protos.iec10x.packets import *
@@ -30,9 +31,9 @@ TIMEOUT_T2 = 10
 TIMEOUT_T3 = 20
 
 class ControlledState(Enum):
-    STOPPED : int = 0
-    STARTED : int = 1
-    PENDING : int = 2
+    STOPPED = 0
+    STARTED = 1
+    PENDING = 2
 
 class IEC104Handler(Thread):
     
@@ -302,6 +303,7 @@ class IEC104Handler(Thread):
             atype=0x31
         else:
             io = IO62(_sq=0, _number=1, _balanced=False, IOA=ioa, SVA=value, SE=int(select), time=currtime)
+            atype=0x3e
         asdu = ASDU(type=atype, VSQ=vsq, COT_flags=cot_flags, COT=cot, CommonAddress=self._device.guid, IO=io)
         self._send_queue.put(APDU()/APCI(type=0x00)/asdu)
 
@@ -311,7 +313,7 @@ class IEC104Handler(Thread):
         asdu : ASDU = apdu['ASDU']
         oio = asdu.IO
         # Add IC (actcon) to the message queue
-        rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=7, CommonAddress=self.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
+        rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=7, CommonAddress=device.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
         self._send_queue.put(APDU()/APCI(type=0x00)/rasdu, block=True, timeout=TIMEOUT_T2)
         sleep(ICMD_WAIT)
         # Add process information
@@ -329,7 +331,7 @@ class IEC104Handler(Thread):
             self._send_queue.put(APDU()/APCI(type=0x00)/rasdu, block=True, timeout=TIMEOUT_T2)
             sleep(min(ICMD_WAIT, TIMEOUT_T2/len(self._mem_map)))
         # Add IC (actterm) to the message queue
-        rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=10, CommonAddress=self.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
+        rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=10, CommonAddress=device.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
         self._send_queue.put(APDU()/APCI(type=0x00)/rasdu, block=True, timeout=TIMEOUT_T2)
 
     def _handle_IO102(self, apdu : APDU):
@@ -351,15 +353,15 @@ class IEC104Handler(Thread):
     def _handle_iframe(self, apdu : APDU):
         atype : int = apdu['ASDU'].type
         cot : int = apdu['ASDU'].COT
-        iframe_handlers : dict[tuple, function] = {
+        iframe_handlers : dict[tuple, Callable] = {
             (45, 6) : self._handle_IO45_IO58, # Single command (Act)
             (46 ,6) : self._handle_IO46_IO59, # Double command (Act)
             (49, 6) : self._handle_IO49_IO62, # Set-point command, scaled value (Act)
             (58, 6) : self._handle_IO45_IO58, # Single command with time tag CP56Time2a (Act)
             (59, 6) : self._handle_IO46_IO59, # Double command with time tag CP56Time2a (Act)
             (62, 6) : self._handle_IO49_IO62, # Set-point command, scaled value with time tag CP56Time2a (Act)
-            (100, 6) : self._handle_IO100, # Interrogation command (Act)
-            (102, 5) : self._handle_IO102, # Read command (req)
+            (100, 6) : self._handle_IO100,    # Interrogation command (Act)
+            (102, 5) : self._handle_IO102,    # Read command (req)
         }
         if (atype, cot) in iframe_handlers.keys(): 
             iframe_handlers[(atype, cot)](apdu)
@@ -367,7 +369,7 @@ class IEC104Handler(Thread):
     def run(self):
         state = self._state
         buffer : APDU = APDU()
-        datatr : Thread = None
+        datatr : Optional[Thread] = None
         receiver : Thread = Thread(target=self._frame_receiver)
         sender : Thread = Thread(target=self._frame_sender)
         sender.start()
@@ -418,7 +420,8 @@ class IEC104Handler(Thread):
                                     state = ControlledState.STOPPED
                                 else:
                                     state = ControlledState.PENDING
-                                datatr.join()
+                                if datatr is not None:
+                                    datatr.join()
                                 datatr = None
                     else:
                         sleep(DATATR_WAIT)
@@ -439,7 +442,8 @@ class IEC104CLI(Cmd):
         self._sock : socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
         self._device_map : dict[int, Union[int, bool]] = dict()
         self._rth : Thread
-        self._end_recv : bool = True
+        self._sth : Thread
+        self._end_conn : bool = True
         self._req_apdu : Union[APDU, None] = None
         self._tx : int
         self._rx : int
@@ -458,66 +462,113 @@ class IEC104CLI(Cmd):
     def _receiver(self):
         alive : bool = True
         sock = self._sock
-        while alive and not self._end_recv:
+        while alive and not self._end_conn:
             try:
                 buffer = sock.recv(MAX_LENGTH)
                 apdu : APDU = APDU(buffer)
-                assert apdu.haslayer('ASDU'), f'Received unknown data: {buffer}\r\n'
-                asdu = apdu['ASDU']
+                assert apdu.haslayer('APCI'), f'Received unknown data: {buffer}\r\n'
+                if apdu.haslayer('ASDU'):
+                    asdu = apdu['ASDU']
+                    if asdu.COT == 5: # Requested
+                        self._req_apdu = APDU(apdu.build())
+                    else:
+                        io = asdu.IO
+                        if issubclass(io.__class__, IO):
+                            self._map_io(io)
+                        elif isinstance(io, list) and all(issubclass(x.__class__, IO) for x in io):
+                            for x in io:
+                                self._map_io(x)
                 self._rx += 1
-                if asdu.COT == 5: # Requested
-                    self._req_apdu = APDU(apdu.build())
-                else:
-                    io = asdu.IO
-                    if issubclass(io.__class__, IO):
-                        self._map_io(io)
-                    elif isinstance(io, list) and all(issubclass(x.__class__, IO) for x in io):
-                        for x in io:
-                            self._map_io(x)
             except AssertionError as e:
-                stderr.write(e)
+                stderr.write(str(e))
                 stderr.flush()
             except BrokenPipeError:
                 alive = False
             except TimeoutError:
-                self._end_recv = True
+                self._end_conn = True
     
     def _sender(self):
-        # TODO: APDU Sender thread
-        pass
+        alive : bool = True
+        sock = self._sock
+        while alive and not self._end_conn:
+            try:
+                if not self._tx_queue.empty():
+                    apdu : APDU = self._tx_queue.get()
+                    if apdu['APCI'].type == 0:
+                        apdu['APCI'].Tx = self._tx
+                    if apdu['APCI'].type < 3:
+                        apdu['APCI'].Rx = self._rx
+                    sock.send(apdu.build())
+                    self._tx += 1
+                else:
+                    sleep(TIMEOUT_T2)
+            except (BrokenPipeError, TimeoutError):
+                alive = False
     
     def do_disconnect(self, arg):
-        self._end_recv = True
+        print(f'Stopping data transmission ...', end=' ')
+        self._tx_queue.put(APDU()/APCI(type=0x03, UType=0x04), block=False)
+        print('OK')
+        print(f'Closing connection ...', end=' ')
+        self._end_conn = True
         if self._rth.is_alive():
             self._rth.join()
+        if self._sth.is_alive():
+            self._sth.join()
         self._sock.shutdown(SHUT_RDWR)
         self._sock.close()
+        print('OK')
+        print(f'Clearing memory mappings ...', end=' ')
+        self._device_map = dict()
+        print('OK')
     
     def do_connect(self, arg : str):
         sock = self._sock
         try:
             assert len(arg) > 7, f'{arg} is too short to contain an IPv4 address\r\n'
-            arg = arg.split()
-            addr = arg[0]
+            argl : list[str] = arg.split()
+            addr = argl[0]
             assert valid_ipv4(addr), f'{addr} is not a valid IPv4 address\r\n'
-            port = arg[1] if len(arg) > 1 else IEC104_PORT
+            port = argl[1] if len(argl) > 1 else IEC104_PORT
             try:
                 sock.getsockopt(SOL_SOCKET, SO_ERROR)
                 # If no OSError, the socket is already connected
                 print(f'Already connected to: {str(sock.getpeername())}')
             except OSError:
                 # Not connected
+                sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
                 sock.connect((addr, port))
                 sock.settimeout(TIMEOUT_T1)
                 self._rx = 0
                 self._tx = 0
                 print(f'Connected to: {str(sock.getpeername())}')
-                print(f'Starting recevier thread ...')
+                print(f'Starting sender/recevier threads ...', end=' ')
                 self._rth = Thread(target=self._receiver)
+                self._sth = Thread(target=self._sender)
                 self._rth.start()
-                print(f'Starting data transmission ...')
-
+                self._sth.start()
+                print('OK')
+                print(f'Starting data transmission ...', end=' ')
+                self._tx_queue.put(APDU()/APCI(type=0x03, UType=0x01), block=False)
+                print(f'OK')
         except AssertionError as e:
             stderr.write(str(e))
             stderr.flush()
+    
+    def do_status(self, arg : int):
+        try:
+            self._sock.getsockopt(SOL_SOCKET, SO_ERROR)
+            print(f'Connected to: {str(self._sock.getpeername())}')
+            print(f'Status at {datetime.now().ctime()}:\r\n')
+            print('IOA\tValue')
+            print(16*'=')
+            for k, v in self._device_map.items():
+                if isinstance(v, bool):
+                    val = 'ON' if v else 'OFF'
+                else:
+                    val = v
+                print(f'{k}\t{val}')
+            print(16*'=')
+        except OSError:
+            print(f'Not connected')
         
