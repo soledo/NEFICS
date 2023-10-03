@@ -1,0 +1,93 @@
+{
+    "switches": [{"name": "s1", "dpid": 1}, {"name": "s2", "dpid": 2}],
+    "devices": [
+        {
+            "name": "honeypot",
+            "interfaces": [
+                {"name": "eth0", "ip": "192.168.0.250/24", "switch": "s1"},
+                {"name": "eth1", "ip": "10.0.0.250/24", "switch": "s2"}
+            ],
+            "launcher": {
+                "module": "honeypot",
+                "device": "HoneyDevice",
+                "handler": "HoneyHandler",
+                "guid": 1, "in": [], "out": [],
+                "parameters": {
+                    "honeyconf": "conf/honeypot_warehouse.conf"
+                }
+            },
+            "routes": [["default", "192.168.0.1"]]
+        },
+        {
+            "name": "scanner",
+            "interfaces": [
+                {"name": "eth0", "ip": "192.168.0.251/24", "switch": "s1"}
+            ],
+            "routes": [["default", "192.168.0.1"]]
+        },
+        {
+            "name": "hmi",
+            "interfaces": [
+                {"name": "eth0", "ip": "10.0.0.5/24", "switch": "s2"}
+            ],
+            "routes": [["default", "10.0.0.250"]]
+        },
+        {
+            "name": "plc1",
+            "interfaces": [
+                {"name": "eth0", "ip": "10.0.0.10/24", "switch": "s2"}
+            ],
+            "routes": [["default", "10.0.0.250"]],
+            "launcher": {
+                "module": "honeypot",
+                "device": "ConveyorPLC",
+                "handler": "PLCHandler",
+                "guid": 10, "in": [], "out":[],
+                "parameters": {
+                    "html": "html/AB1756ENBTA",
+                    "httpsrv": "GoAhead-Webs",
+                    "protos": ["http", "modbus"],
+                    "info": {
+                        "vname": "Allen-Bradley",
+                        "pcode": "00D65567",
+                        "rev": "6.006 Build 4",
+                        "dname": "1756-ENBT/A",
+                        "model": "1756-ENBT/A"
+                    },
+                    "phys_ip": "10.0.0.110"
+                }
+            }
+        },
+        {
+            "name": "plc2",
+            "interfaces": [
+                {"name": "eth0", "ip": "10.0.0.11/24", "switch": "s2"}
+            ],
+            "routes": [["default", "10.0.0.250"]],
+            "launcher": {
+                "module": "honeypot",
+                "device": "ForkliftPLC",
+                "handler": "PLCHandler",
+                "guid": 11, "in": [], "out":[],
+                "parameters": {
+                    "html": "html/AB1756ENBTA",
+                    "httpsrv": "GoAhead-Webs",
+                    "protos": ["http", "modbus"],
+                    "info": {
+                        "vname": "Allen-Bradley",
+                        "pcode": "00D65567",
+                        "rev": "6.006 Build 4",
+                        "dname": "1756-ENBT/A",
+                        "model": "1756-ENBT/A"
+                    },
+                    "phys_ip": "10.0.0.110",
+                    "cnv_ip": "10.0.0.10"
+                }
+            }
+        }
+    ],
+    "localiface": {
+        "switch": "s2",
+        "iface": "eth1"
+    }
+}

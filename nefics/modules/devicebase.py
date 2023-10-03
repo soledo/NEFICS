@@ -151,16 +151,16 @@ class IEDBase(Thread):
         return True if self._memory[address] == 0x1 else False
     
     def read_word(self, address: int) -> int:
-        '''Read a Little-Endian WORD representation of the stored value in [address, address + 1] bytes'''
+        '''Read a Little-Endian WORD representation of the stored value in a given address'''
         assert address <= 0x3FFFF and address >= 0x00000
-        assert all(a in self._memory.keys() for a in [address, address + 1])
-        return self._memory[address] + (self._memory[address + 1] << 8)
+        assert address in self._memory.keys()
+        return self._memory[address]
     
     def read_ieee_float(self, address : int) -> float:
-        '''Read an IEEE 754 half-precision 16-bit float representation of the stored value in [address, address + 1] bytes'''
+        '''Read an IEEE 754 half-precision 16-bit float representation of the stored value in a given address'''
         assert address <= 0x3FFFF and address >= 0x00000
-        assert all(a in self._memory.keys() for a in [address, address + 1])
-        return unpack('<e', bytes([self._memory[address], self._memory[address + 1]]))[0]
+        assert address in self._memory.keys()
+        return self._memory[address]
     
     def _write_bool(self, address : int, value: bool):
         '''Write a boolean representation of the stored byte'''
@@ -171,36 +171,33 @@ class IEDBase(Thread):
     def write_bool(self, address : int, value : bool):
         '''Queue a write request for a boolean value in a given address'''
         assert address <= 0x3FFFF and address >= 0x00000
-        assert all(a in self._memory.keys() for a in [address, address + 1])
+        assert all(a in self._memory.keys() for a in [address])
         self._mem_wr_queue.put((self._write_bool, address, value))
     
     def _write_word(self, address : int, value: int):
-        '''Write a Little-Endian WORD representation of the stored value in [address, address + 1] bytes'''
+        '''Write a Little-Endian WORD representation of the stored value in a given address'''
         assert address <= 0x3FFFF and address >= 0x00000
         assert value >= 0x0000 and value <= 0xFFFF
-        assert all(a in self._memory.keys() for a in [address, address + 1])
-        self._memory[address] = value & 0xff
-        self._memory[address + 1] = (value & 0xff00) >> 8
+        assert address in self._memory.keys()
+        self._memory[address] = value & 0xFFFF
     
     def write_word(self, address : int, value : int):
         '''Queue a write request for a 16-bit WORD value in a given address'''
         assert address <= 0x3FFFF and address >= 0x00000
         assert value >= 0x0000 and value <= 0xFFFF
-        assert all(a in self._memory.keys() for a in [address, address + 1])
+        assert address in self._memory.keys()
         self._mem_wr_queue.put((self._write_word, address, value))
     
     def _write_ieee_float(self, address : int, value: float):
-        '''Write an IEEE 754 half-precision 16-bit float float representation of the stored value in [address, address + 1] bytes'''
+        '''Write an IEEE 754 half-precision 16-bit float float representation of the stored value in a given address'''
         assert address <= 0x3FFFF and address >= 0x00000
-        assert all(a in self._memory.keys() for a in [address, address + 1])
-        raw : bytes = pack('<e', value)
-        self._memory[address] = raw[0]
-        self._memory[address + 1] = raw[1]
+        assert address in self._memory.keys()
+        self._memory[address] = value
     
     def write_ieee_float(self, address : int, value : float):
         '''Queue a write request for an IEEE 754 half-precision 16-bit float value in a given address'''
         assert address <= 0x3FFFF and address >= 0x00000
-        assert all(a in self._memory.keys() for a in [address, address + 1])
+        assert address in self._memory.keys()
         self._mem_wr_queue.put((self._write_ieee_float, address, value))
     
     def _memory_writer(self):
@@ -217,7 +214,8 @@ class IEDBase(Thread):
                     #
                     # Do nothing to prevent any reconnaissance actions
                     continue
-            sleep(0.03) # 30ms is a standard delay within a LAN, we don't expect faster requests from a single connection
+            else:
+                sleep(0.03) # 30ms is a standard delay within a LAN, we don't expect faster requests from a single connection
 
     # Physical process
     def simulate(self):

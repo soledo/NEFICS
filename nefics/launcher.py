@@ -85,12 +85,16 @@ def launcher_main():
         else:
             _ = os.system('clear')
     
+    if os.name == 'posix':
+        os.system('stty -echo')
     handler.start()
     while not handler.terminate:
         clearscreen()
         handler.status()
         sleep(1)
     handler.join()
+    if os.name == 'posix':
+        os.system('stty echo')
     
 if __name__ == '__main__':
     launcher_main()

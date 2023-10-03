@@ -302,7 +302,7 @@ def nefics(conf: dict):
                 device.cmd(f'ip route add {rt[0]} via {rt[1]}')
         if 'launcher' in dev.keys():
             net.terms += makeTerm(devices[dev['name']], cmd=f"python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\'")
-            sleep(0.333)
+            sleep(0.5)
     localxterm = Popen(['xterm', '-display', environ['DISPLAY']], stdout=PIPE, stdin=PIPE)
     CLI(net)
     localxterm.kill()

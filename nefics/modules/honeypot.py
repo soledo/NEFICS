@@ -5,13 +5,20 @@ import subprocess
 import os
 from enum import Enum
 from time import sleep
-# from math import max
 from datetime import datetime
 from threading import Thread
 from typing import Union, Callable
+
 # NEFICS imports
 from nefics.modules.devicebase import IEDBase, DeviceHandler, ProtocolListener, LOG_PRIO
 from nefics.protos import http, modbus
+
+# Globals
+
+SYNC_TIMER : float = 0.05
+LOOP_TIMER : float = SYNC_TIMER * 2.0
+
+# Honeypot base classes
 
 class HoneyDevice(IEDBase):
     # Will only hold the honeyd configuration
@@ -67,37 +74,17 @@ class HoneyHandler(DeviceHandler):
             self._process.terminate()
             self._process.wait(20)
 
-class PLCMemMapping(Enum):
-    TANK_LVL  : int = 0x20000
-    SET_POINT : int = 0x30000
-    VALVE_IN  : int = 0x30002
-    VALVE_OUT : int = 0x30004
-
-class PhysMemMapping(Enum):
-    # FactoryIO Modbus Mapping
-    TANK_LVL  : int = 0x0001 # IR
-    VALVE_IN  : int = 0x0000 # HR
-    VALVE_OUT : int = 0x0001 # HR
+# Scenario-agnostic PLC device and handler
 
 class PLCDevice(IEDBase):
 
     def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
-        assert 'phys_ip' in kwargs.keys() and isinstance(kwargs['phys_ip'], str)
-        assert 'set_point' in kwargs.keys() and isinstance(kwargs['set_point'], float) and kwargs['set_point'] > 0.0 and kwargs['set_point'] < 3.0
+        assert 'phys_ip' in kwargs.keys() and isinstance(kwargs['phys_ip'], str), f'Physical process simulation IP address is missing ([phys_ip] directive not found).'
         self._html : Union[str, None] = kwargs['html'] if 'html' in kwargs.keys() and isinstance(kwargs['html'], str) else None
         self._httpsrv = kwargs['httpsrv'] if 'httpsrv' in kwargs.keys() and isinstance(kwargs['httpsrv'], str) else None
         self._protocols : Union[list[str], None] = kwargs['protos'] if 'protos' in kwargs.keys() and isinstance(kwargs['protos'], list) and all(isinstance(x, str) for x in kwargs['protos']) else None
         self._phys_ip = kwargs['phys_ip']
-        set_point : int = int((1000.0 * kwargs['set_point']) / 3.0) # Set point (HR) [0-1000] <-> [0-3m]
-        self._memory[PLCMemMapping.TANK_LVL.value] = 0 # Water level meter (IR) [0-1000] <-> [0-3m]
-        self._memory[PLCMemMapping.TANK_LVL.value + 1] = 0
-        self._memory[PLCMemMapping.SET_POINT.value] =  set_point & 0xff
-        self._memory[PLCMemMapping.SET_POINT.value + 1] =  (set_point & 0xff00) >> 8
-        self._memory[PLCMemMapping.VALVE_IN.value] = 0 # Valve in (HR) [0-1000] <-> [0-100%]
-        self._memory[PLCMemMapping.VALVE_IN.value + 1] = 0
-        self._memory[PLCMemMapping.VALVE_OUT.value] = 0 # Valve out (HR) [0-1000] <-> [0-100%]
-        self._memory[PLCMemMapping.VALVE_OUT.value + 1] = 0
     
     @property
     def httpsrv_header(self) -> str:
@@ -112,10 +99,6 @@ class PLCDevice(IEDBase):
         return self._protocols
     
     def __str__(self) -> str:
-        ref : float = (self.read_word(PLCMemMapping.SET_POINT.value) * 3.0) / 1000.0
-        lvl : float = (self.read_word(PLCMemMapping.TANK_LVL.value) * 3.0) / 1000.0
-        v_in : float = self.read_word(PLCMemMapping.VALVE_IN.value) / 10.0
-        v_out : float = self.read_word(PLCMemMapping.VALVE_OUT.value) / 10.0
         devicestr : str = (
             f'    ### Emulated PLC Device\r\n'
             f'     ## Module: {self.__class__.__module__}\r\n'
@@ -126,46 +109,8 @@ class PLCDevice(IEDBase):
             f'        Revision:     {self._revision}\r\n'
             f'        Device name:  {self._device_name}\r\n'
             f'        Device model: {self._device_model}\r\n\r\n'
-            f'      # Status\r\n'
-            f'        Set point:  {ref:0.2f} m\r\n'
-            f'        Tank level: {lvl:0.2f} m\r\n'
-            f'        Valve in:   {v_in:0.2f} %\r\n'
-            f'        Valve out:  {v_out:0.2f} %\r\n'
         )
         return devicestr
-    
-    def sync(self):
-        phys : modbus.ModbusClient = modbus.ModbusClient(self._phys_ip)
-        phys.connect()
-        while not self._terminate:
-            lvl = phys.read_input_word(PhysMemMapping.TANK_LVL.value, unit=1)
-            self._write_word(PLCMemMapping.TANK_LVL.value, lvl)
-            phys.send_word(PhysMemMapping.VALVE_IN.value, self.read_word(PLCMemMapping.VALVE_IN.value), unit=1)
-            phys.send_word(PhysMemMapping.VALVE_OUT.value, self.read_word(PLCMemMapping.VALVE_OUT.value), unit=1)
-        phys.close()
-
-    def simulate(self):
-        sync_thread = Thread(target=self.sync)
-        sync_thread.start()
-        t_s : float = 0.1 # Sample time
-        e_i : float = 0.0 # Error
-        h_0 : float = 1.5 # Linearization point
-        while not self._terminate:
-            # Simple LQI controller using a set point
-            ref : float = (self.read_word(PLCMemMapping.SET_POINT.value) * 3.0) / 1000.0
-            lvl = self.read_word(PLCMemMapping.TANK_LVL.value)
-            lvl = (lvl * 3.0) / 1000.0
-            e_i = e_i + (ref - lvl) * t_s
-            e_i = max(-15, e_i) if e_i < 15 else 15
-            v_in : int = int( (-0.79 * (lvl - h_0) + 0.07 * e_i + 0.5) * 1000)
-            v_out : int = int( (0.79 * (lvl - h_0) -0.07 * e_i + 0.5) * 1000)
-            v_in = max(0, v_in) if v_in < 1000 else 1000
-            v_out = max(0, v_out) if v_out < 1000 else 1000
-            self._write_word(PLCMemMapping.VALVE_IN.value, v_in)
-            self._write_word(PLCMemMapping.VALVE_OUT.value, v_out)
-            sleep(t_s)
-        sync_thread.join()
-
 
 class PLCHandler(DeviceHandler):
 
@@ -206,15 +151,15 @@ class PLCHandler(DeviceHandler):
     def run(self):
         self._device.start()
         if self._device.protocols is not None:
-            phandlers : dict[str, Callable]= {
+            protocol_handlers : dict[str, Callable]= {
                 'http' : self._start_http,
                 'modbus' : self._start_modbus
             }
-            for p in self._device.protocols:
-                if p.lower() in phandlers.keys():
-                    phandlers[p]()
+            for protocol in self._device.protocols:
+                if protocol.lower() in protocol_handlers.keys():
+                    protocol_handlers[protocol]()
                 else:
-                    self._device.log(message=f'Unknown protocol: {p}', prio=LOG_PRIO['WARNING'])
+                    self._device.log(message=f'Unknown protocol: {protocol}', prio=LOG_PRIO['WARNING'])
         while not self._terminate:
             # Dummy loop
             sleep(1)
@@ -224,4 +169,391 @@ class PLCHandler(DeviceHandler):
                     thr.terminate = True
                     thr.join(1)
         self._device.join()
+
+# Scenario #1 - Water tank
+
+class WaterTankPLCMemMapping(Enum):
+    TANK_LVL  : int = 0x20000
+    SET_POINT : int = 0x30000
+    VALVE_IN  : int = 0x30001
+    VALVE_OUT : int = 0x30002
+
+class WaterTankPhysMemMapping(Enum):
+    # FactoryIO Modbus Mapping
+    # -- Input Registers --
+    TANK_LVL  : int = 0x0001
+    # -- Holding Registers --
+    VALVE_IN  : int = 0x0000
+    VALVE_OUT : int = 0x0001
+
+class WaterTankPLC(PLCDevice):
+
+    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+        assert 'set_point' in kwargs.keys() and isinstance(kwargs['set_point'], float), f'Missing set point ([set_point] directive not found)'
+        assert kwargs['set_point'] > 0.0 and kwargs['set_point'] < 3.0, f'Set point out of range'
+        set_point : int = int((1000.0 * kwargs['set_point']) / 3.0) # Set point (HR) [0-1000] <-> [0-3m]
+        self._memory[WaterTankPLCMemMapping.TANK_LVL.value] = 0 # Water level meter (IR) [0-1000] <-> [0-3m]
+        self._memory[WaterTankPLCMemMapping.SET_POINT.value] =  set_point & 0xff
+        self._memory[WaterTankPLCMemMapping.VALVE_IN.value] = 0 # Valve in (HR) [0-1000] <-> [0-100%]
+        self._memory[WaterTankPLCMemMapping.VALVE_OUT.value] = 0 # Valve out (HR) [0-1000] <-> [0-100%]
         
+    def __str__(self) -> str:
+        ref : float = (self.read_word(WaterTankPLCMemMapping.SET_POINT.value) * 3.0) / 1000.0
+        lvl : float = (self.read_word(WaterTankPLCMemMapping.TANK_LVL.value) * 3.0) / 1000.0
+        v_in : float = self.read_word(WaterTankPLCMemMapping.VALVE_IN.value) / 10.0
+        v_out : float = self.read_word(WaterTankPLCMemMapping.VALVE_OUT.value) / 10.0
+        status : str = (
+            f'      # PLC Status\r\n'
+            f'        Set point:  {ref:0.2f} m\r\n'
+            f'        Tank level: {lvl:0.2f} m\r\n'
+            f'        Valve in:   {v_in:0.2f} %\r\n'
+            f'        Valve out:  {v_out:0.2f} %\r\n'
+        )
+        return super().__str__() + status
+
+    def sync(self):
+        phys : modbus.ModbusClient = modbus.ModbusClient(self._phys_ip)
+        phys.connect()
+        while not self._terminate:
+            try:
+                lvl = phys.read_input_word(WaterTankPhysMemMapping.TANK_LVL.value, unit=1)
+                self._write_word(WaterTankPLCMemMapping.TANK_LVL.value, lvl)
+                phys.send_word(WaterTankPhysMemMapping.VALVE_IN.value, self.read_word(WaterTankPLCMemMapping.VALVE_IN.value), unit=1)
+                phys.send_word(WaterTankPhysMemMapping.VALVE_OUT.value, self.read_word(WaterTankPLCMemMapping.VALVE_OUT.value), unit=1)
+            except BrokenPipeError:
+                phys.reconnect()
+            sleep(SYNC_TIMER)
+        phys.close()
+
+    def simulate(self):
+        sync_thread = Thread(target=self.sync)
+        sync_thread.start()
+        t_s : float = 0.1 # Sample time
+        e_i : float = 0.0 # Error
+        h_0 : float = 1.5 # Linearization point
+        while not self._terminate:
+            # Simple LQI controller using a set point
+            ref : float = (self.read_word(WaterTankPLCMemMapping.SET_POINT.value) * 3.0) / 1000.0
+            lvl = self.read_word(WaterTankPLCMemMapping.TANK_LVL.value)
+            lvl = (lvl * 3.0) / 1000.0
+            e_i = e_i + (ref - lvl) * t_s
+            e_i = max(-15, e_i) if e_i < 15 else 15
+            v_in : int = int( (-0.79 * (lvl - h_0) + 0.07 * e_i + 0.5) * 1000)
+            v_out : int = int( (0.79 * (lvl - h_0) -0.07 * e_i + 0.5) * 1000)
+            v_in = max(0, v_in) if v_in < 1000 else 1000
+            v_out = max(0, v_out) if v_out < 1000 else 1000
+            self._write_word(WaterTankPLCMemMapping.VALVE_IN.value, v_in)
+            self._write_word(WaterTankPLCMemMapping.VALVE_OUT.value, v_out)
+            sleep(t_s)
+        sync_thread.join()
+
+# Scenario #2 - Automated warehouse
+
+# Warehouse key positions
+IDLE_POSITION : int = 55
+RETRIEVE_NONE : int = 0
+MAX_STORAGE : int = 54
+MIN_STORAGE : int = 1
+FORKLIFT_TIMER : float = LOOP_TIMER * 15.0
+
+class WarehousePhysMemMapping(Enum):
+    # FactoryIO Modbus Mapping
+    # -- Coils --
+    ENTRY_CONVEYOR  : int = 0x0000
+    LOAD_CONVEYOR   : int = 0x0001
+    FORKS_LEFT      : int = 0x0002
+    FORKS_RIGHT     : int = 0x0003
+    LIFT            : int = 0x0004
+    UNLOAD_CONVEYOR : int = 0x0005
+    EXIT_CONVEYOR   : int = 0x0006
+    # -- Direct Input --
+    AT_ENTRY  : int = 0x0000
+    AT_LOAD   : int = 0x0001
+    AT_LEFT   : int = 0x0002
+    AT_MIDDLE : int = 0x0003
+    AT_RIGHT  : int = 0x0004
+    AT_UNLOAD : int = 0x0005
+    AT_EXIT   : int = 0x0006
+    MOVING_X  : int = 0x0007
+    MOVING_Z  : int = 0x0008
+    # -- Holding Registers --
+    TARGET_POSITION : int = 0x0000
+
+class ConveyorPLCMemMapping(Enum):
+    AT_ENTRY        : int = 0x00000
+    AT_LOAD         : int = 0x00001
+    AT_UNLOAD       : int = 0x00002
+    AT_EXIT         : int = 0x00003
+    ENTRY_CONVEYOR  : int = 0x10000
+    LOAD_CONVEYOR   : int = 0x10001
+    UNLOAD_CONVEYOR : int = 0x10002
+    EXIT_CONVEYOR   : int = 0x10003
+    FORKLIFT_BUSY   : int = 0x10004
+
+class ConveyorPLC(PLCDevice):
+
+    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+        self._memory[ConveyorPLCMemMapping.AT_ENTRY.value       ] = 0
+        self._memory[ConveyorPLCMemMapping.AT_LOAD.value        ] = 0
+        self._memory[ConveyorPLCMemMapping.AT_UNLOAD.value      ] = 0
+        self._memory[ConveyorPLCMemMapping.AT_EXIT.value        ] = 0
+        self._memory[ConveyorPLCMemMapping.ENTRY_CONVEYOR.value ] = 0
+        self._memory[ConveyorPLCMemMapping.LOAD_CONVEYOR.value  ] = 0
+        self._memory[ConveyorPLCMemMapping.UNLOAD_CONVEYOR.value] = 0
+        self._memory[ConveyorPLCMemMapping.EXIT_CONVEYOR.value  ] = 0
+        self._memory[ConveyorPLCMemMapping.FORKLIFT_BUSY.value  ] = 0
+    
+    def __str__(self) -> str:
+        at_entry : str = "X" if self.read_bool(ConveyorPLCMemMapping.AT_ENTRY.value) else " "
+        at_load : str = "X" if self.read_bool(ConveyorPLCMemMapping.AT_LOAD.value) else " "
+        at_unload : str = "X" if self.read_bool(ConveyorPLCMemMapping.AT_UNLOAD.value) else " "
+        at_exit : str = "X" if self.read_bool(ConveyorPLCMemMapping.AT_EXIT.value) else " "
+        entry_cnv : str = "X" if self.read_bool(ConveyorPLCMemMapping.ENTRY_CONVEYOR.value) else " "
+        load_cnv : str = "X" if self.read_bool(ConveyorPLCMemMapping.LOAD_CONVEYOR.value) else " "
+        unload_cnv : str = "X" if self.read_bool(ConveyorPLCMemMapping.UNLOAD_CONVEYOR.value) else " "
+        exit_cnv : str = "X" if self.read_bool(ConveyorPLCMemMapping.EXIT_CONVEYOR.value) else " "
+        forklift : str = "X" if self.read_bool(ConveyorPLCMemMapping.FORKLIFT_BUSY.value) else " "
+        status = (
+            f'      # PLC Status:\r\n\r\n'
+            f'        Sensors:\r\n'
+            f'        [{at_entry}] Entry\t[{at_load}] Load\t[{at_unload}] Unload\t[{at_exit}] Exit\r\n'
+            f'        Conveyors:\r\n'
+            f'        [{entry_cnv}] Entry\t[{load_cnv}] Load\t[{unload_cnv}] Unload\t[{exit_cnv}] Exit \r\n'
+            f'        Process:\r\n'
+            f'        [{forklift}] Forklift Busy\r\n'
+        )
+        return super().__str__() + status
+
+    def sync(self):
+        phys : modbus.ModbusClient = modbus.ModbusClient(self._phys_ip)
+        phys.connect()
+        while not self._terminate:
+            try:
+                # Sensors
+                self.write_bool(ConveyorPLCMemMapping.AT_ENTRY.value, phys.read_discrete_input(WarehousePhysMemMapping.AT_ENTRY.value))
+                self.write_bool(ConveyorPLCMemMapping.AT_LOAD.value, phys.read_discrete_input(WarehousePhysMemMapping.AT_LOAD.value))
+                self.write_bool(ConveyorPLCMemMapping.AT_UNLOAD.value, phys.read_discrete_input(WarehousePhysMemMapping.AT_UNLOAD.value))
+                self.write_bool(ConveyorPLCMemMapping.AT_EXIT.value, phys.read_discrete_input(WarehousePhysMemMapping.AT_EXIT.value))
+                # Actuators
+                phys.send_bool(WarehousePhysMemMapping.ENTRY_CONVEYOR.value, self.read_bool(ConveyorPLCMemMapping.ENTRY_CONVEYOR.value))
+                phys.send_bool(WarehousePhysMemMapping.LOAD_CONVEYOR.value, self.read_bool(ConveyorPLCMemMapping.LOAD_CONVEYOR.value))
+                phys.send_bool(WarehousePhysMemMapping.UNLOAD_CONVEYOR.value, self.read_bool(ConveyorPLCMemMapping.UNLOAD_CONVEYOR.value))
+                phys.send_bool(WarehousePhysMemMapping.EXIT_CONVEYOR.value, self.read_bool(ConveyorPLCMemMapping.EXIT_CONVEYOR.value))
+            except BrokenPipeError:
+                phys.reconnect()
+            sleep(SYNC_TIMER)
+        phys.close()
+    
+    def simulate(self):
+        sync_thread = Thread(target=self.sync)
+        sync_thread.start()
+        while not self._terminate:
+            at_entry = not self.read_bool(ConveyorPLCMemMapping.AT_ENTRY.value)     # FactoryIO uses negative logic sensors for this purpose (True -> Empty, False -> Box)
+            at_load = not self.read_bool(ConveyorPLCMemMapping.AT_LOAD.value)       # FactoryIO uses negative logic sensors for this purpose (True -> Empty, False -> Box)
+            at_exit = not self.read_bool(ConveyorPLCMemMapping.AT_EXIT.value)       # FactoryIO uses negative logic sensors for this purpose (True -> Empty, False -> Box)
+            forklift = self.read_bool(ConveyorPLCMemMapping.FORKLIFT_BUSY.value)
+            self.write_bool(ConveyorPLCMemMapping.ENTRY_CONVEYOR.value, not (at_load or forklift))
+            self.write_bool(ConveyorPLCMemMapping.LOAD_CONVEYOR.value, not (at_load or forklift))
+            self.write_bool(ConveyorPLCMemMapping.UNLOAD_CONVEYOR.value, not (at_exit or forklift))
+            self.write_bool(ConveyorPLCMemMapping.EXIT_CONVEYOR.value, not at_exit)
+            sleep(LOOP_TIMER)
+        sync_thread.join()
+
+class ForkliftPLCMemMapping(Enum):
+    AT_LEFT           : int = 0x00000
+    AT_MIDDLE         : int = 0x00001
+    AT_RIGHT          : int = 0x00002
+    MOVING_X          : int = 0x00003
+    MOVING_Z          : int = 0x00004
+    FORKS_LEFT        : int = 0x10000
+    FORKS_RIGHT       : int = 0x10001
+    LIFT              : int = 0x10002
+    TARGET_POSITION   : int = 0x30000
+    RETRIEVE_POSITION : int = 0x30001
+
+class ForkliftStatus(Enum):
+    IDLE : int = 0
+    RECEIVING : int = 1
+    STORING : int = 2
+    RETRIEVING : int = 3
+    DELIVERING : int = 4
+
+class ForkliftPLC(PLCDevice):
+
+    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+        assert 'cnv_ip' in kwargs.keys() and isinstance(kwargs['cnv_ip'], str), f'Missing conveyors PLC IP address ([cnv_ip] directive not found)'
+        self._conveyor_ip : str = kwargs['cnv_ip']
+        self._status : ForkliftStatus                                   = ForkliftStatus.IDLE
+        self._storage : int                                             = 0                     # An integer representing the available shelfs. Each bit represents a shelf (0 -> available, 1 -> occupied), enumerated from the LSB to the MSB
+        self._memory[ForkliftPLCMemMapping.AT_LEFT.value]               = 0
+        self._memory[ForkliftPLCMemMapping.AT_MIDDLE.value]             = 0
+        self._memory[ForkliftPLCMemMapping.AT_RIGHT.value]              = 0
+        self._memory[ForkliftPLCMemMapping.MOVING_X.value]              = 0
+        self._memory[ForkliftPLCMemMapping.MOVING_Z.value]              = 0
+        self._memory[ForkliftPLCMemMapping.FORKS_LEFT.value]            = 0
+        self._memory[ForkliftPLCMemMapping.FORKS_RIGHT.value]           = 0
+        self._memory[ForkliftPLCMemMapping.LIFT.value]                  = 0
+        self._memory[ForkliftPLCMemMapping.TARGET_POSITION.value]       = IDLE_POSITION         # FactoryIO Starting position. The valid range of this holding registar is [0-55]
+        self._memory[ForkliftPLCMemMapping.RETRIEVE_POSITION.value]     = 0                     # Since '0' is 'current position' in FactoryIO, we'll use it to indicate 'retrieve nothing'. The valid range for this holding register will be [0-54]
+    
+    def __str__(self) -> str:
+        at_left = 'X' if self.read_bool(ForkliftPLCMemMapping.AT_LEFT.value) else ' '
+        at_middle = 'X' if self.read_bool(ForkliftPLCMemMapping.AT_MIDDLE.value) else ' '
+        at_right = 'X' if self.read_bool(ForkliftPLCMemMapping.AT_RIGHT.value) else ' '
+        moving_x = 'X' if self.read_bool(ForkliftPLCMemMapping.MOVING_X.value) else ' '
+        moving_z = 'X' if self.read_bool(ForkliftPLCMemMapping.MOVING_Z.value) else ' '
+        forks_left = 'X' if self.read_bool(ForkliftPLCMemMapping.FORKS_LEFT.value) else ' '
+        forks_right = 'X' if self.read_bool(ForkliftPLCMemMapping.FORKS_RIGHT.value) else ' '
+        lift = 'X' if self.read_bool(ForkliftPLCMemMapping.LIFT.value) else ' '
+        target = self.read_word(ForkliftPLCMemMapping.TARGET_POSITION.value)
+        retrieve = self.read_word(ForkliftPLCMemMapping.RETRIEVE_POSITION.value)
+        storage = f'{self._storage:054b}'.replace('0','_').replace('1', 'X')
+        status : str = (
+            f'      # PLC Status:\t{str(self._status)}\r\n\r\n'
+            f'        Sensors:\r\n'
+            f'        [{at_left}] At Left\t[{at_middle}] At Middle\t[{at_right}] At Right\r\n'
+            f'        [{moving_x}] Moving X\t[{moving_z}] Moving Z\r\n'
+            f'        Forklift:\r\n'
+            f'        [{lift}] Lift\t[{forks_left}] Forks Left\t[{forks_right}] Forks Right\r\n'
+            f'        Positioning:\r\n'
+            f'        Store [{target:2d}]\tRetrieve [{retrieve:2d}]\r\n'
+            f'        Storage status:\r\n'
+            f'        [{storage}]'
+        )
+        return super().__str__() + status
+    
+    def _next_available(self) -> int:
+        index : int = 0
+        while bool((self._storage >> index) & 0b1):
+            index += 1
+        return index + 1
+    
+    def sync(self):
+        phys : modbus.ModbusClient = modbus.ModbusClient(self._phys_ip)
+        phys.connect()
+        while not self._terminate:
+            try:
+                # Sensors
+                self.write_bool(ForkliftPLCMemMapping.AT_LEFT.value, phys.read_discrete_input(WarehousePhysMemMapping.AT_LEFT.value))
+                self.write_bool(ForkliftPLCMemMapping.AT_MIDDLE.value, phys.read_discrete_input(WarehousePhysMemMapping.AT_MIDDLE.value))
+                self.write_bool(ForkliftPLCMemMapping.AT_RIGHT.value, phys.read_discrete_input(WarehousePhysMemMapping.AT_RIGHT.value))
+                self.write_bool(ForkliftPLCMemMapping.MOVING_X.value, phys.read_discrete_input(WarehousePhysMemMapping.MOVING_X.value))
+                self.write_bool(ForkliftPLCMemMapping.MOVING_Z.value, phys.read_discrete_input(WarehousePhysMemMapping.MOVING_Z.value))
+                # Forklift
+                phys.send_bool(WarehousePhysMemMapping.LIFT.value, self.read_bool(ForkliftPLCMemMapping.LIFT.value))
+                phys.send_bool(WarehousePhysMemMapping.FORKS_LEFT.value, self.read_bool(ForkliftPLCMemMapping.FORKS_LEFT.value))
+                phys.send_bool(WarehousePhysMemMapping.FORKS_RIGHT.value, self.read_bool(ForkliftPLCMemMapping.FORKS_RIGHT.value))
+                # Positioning
+                phys.send_word(WarehousePhysMemMapping.TARGET_POSITION.value, self.read_word(ForkliftPLCMemMapping.TARGET_POSITION.value))
+            except BrokenPipeError:
+                phys.reconnect()
+            sleep(SYNC_TIMER)
+        phys.close()
+    
+    def simulate(self):
+        sync_thread = Thread(target=self.sync)
+        sync_thread.start()
+        conveyor_plc : modbus.ModbusClient = modbus.ModbusClient(self._conveyor_ip)
+        conveyor_plc.connect()
+        while not self._terminate:
+            try:
+                status : ForkliftStatus = self._status
+                next_shelf : int = self._next_available() & 0x3F
+                if status == ForkliftStatus.IDLE:
+                    at_load : bool = not conveyor_plc.read_discrete_input(ConveyorPLCMemMapping.AT_LOAD.value) # FactoryIO uses negative logic sensors for this purpose (True -> Empty, False -> Box)
+                    retrieve : int = self.read_word(ForkliftPLCMemMapping.RETRIEVE_POSITION.value)
+                    target : int = self.read_word(ForkliftPLCMemMapping.TARGET_POSITION.value)
+                    next_shelf : int = self._next_available() & 0xFF
+                    if retrieve >= MIN_STORAGE and retrieve <= MAX_STORAGE and target == IDLE_POSITION:
+                        conveyor_plc.send_bool(ConveyorPLCMemMapping.FORKLIFT_BUSY.value & 0xFFFF, True)
+                        self._status = ForkliftStatus.RETRIEVING
+                    elif at_load and next_shelf <= MAX_STORAGE:
+                        conveyor_plc.send_bool(ConveyorPLCMemMapping.FORKLIFT_BUSY.value & 0xFFFF, True)
+                        self._status = ForkliftStatus.RECEIVING
+                elif status == ForkliftStatus.RECEIVING:
+                    lift = self.read_bool(ForkliftPLCMemMapping.LIFT.value)
+                    at_middle = self.read_bool(ForkliftPLCMemMapping.AT_MIDDLE.value)
+                    if at_middle:
+                        if lift:
+                            self._status = ForkliftStatus.STORING
+                        else:
+                            self.write_bool(ForkliftPLCMemMapping.FORKS_LEFT.value, True)
+                    else:
+                        if lift:
+                            self.write_bool(ForkliftPLCMemMapping.FORKS_LEFT.value, False)
+                        else:
+                            self.write_bool(ForkliftPLCMemMapping.LIFT.value, True)
+                elif status == ForkliftStatus.STORING:
+                    target = self.read_word(ForkliftPLCMemMapping.TARGET_POSITION.value)
+                    moving = self.read_bool(ForkliftPLCMemMapping.MOVING_X.value) or self.read_bool(ForkliftPLCMemMapping.MOVING_Z.value)
+                    at_middle = self.read_bool(ForkliftPLCMemMapping.AT_MIDDLE.value)
+                    lift = self.read_bool(ForkliftPLCMemMapping.LIFT.value)
+                    if target == IDLE_POSITION:
+                        if not moving:
+                            if lift:
+                                self._storage |= 2 ** (next_shelf - 1)
+                                self.write_word(ForkliftPLCMemMapping.TARGET_POSITION.value, next_shelf)
+                            else:
+                                conveyor_plc.send_bool(ConveyorPLCMemMapping.FORKLIFT_BUSY.value & 0xFFFF, False)
+                                self._status = ForkliftStatus.IDLE
+                    else:
+                        if not moving:
+                            if at_middle:
+                                if lift:
+                                    self.write_bool(ForkliftPLCMemMapping.FORKS_RIGHT.value, True)
+                                else:
+                                    self.write_word(ForkliftPLCMemMapping.TARGET_POSITION.value, IDLE_POSITION)
+                            else:
+                                if lift:
+                                    self.write_bool(ForkliftPLCMemMapping.LIFT.value, False)
+                                else:
+                                    self.write_bool(ForkliftPLCMemMapping.FORKS_RIGHT.value, False)
+
+                elif status == ForkliftStatus.RETRIEVING:
+                    target = self.read_word(ForkliftPLCMemMapping.TARGET_POSITION.value)
+                    retrieve = self.read_word(ForkliftPLCMemMapping.RETRIEVE_POSITION.value)
+                    moving = self.read_bool(ForkliftPLCMemMapping.MOVING_X.value) or self.read_bool(ForkliftPLCMemMapping.MOVING_Z.value)
+                    at_middle = self.read_bool(ForkliftPLCMemMapping.AT_MIDDLE.value)
+                    lift = self.read_bool(ForkliftPLCMemMapping.LIFT.value)
+                    if target == IDLE_POSITION:
+                        if not moving:
+                            if lift:
+                                self.write_word(ForkliftPLCMemMapping.RETRIEVE_POSITION.value, RETRIEVE_NONE)
+                                self._status = ForkliftStatus.DELIVERING
+                            else:
+                                self.write_word(ForkliftPLCMemMapping.TARGET_POSITION.value, retrieve)
+                                self._storage &= ((2 ** (retrieve - 1)) ^ 0xFFFFFFFFFFFFFF) if retrieve in range(MIN_STORAGE,IDLE_POSITION) else self._storage
+                    else:
+                        if not moving:
+                            if at_middle:
+                                if lift:
+                                    self.write_word(ForkliftPLCMemMapping.TARGET_POSITION.value, IDLE_POSITION)
+                                else:
+                                    self.write_bool(ForkliftPLCMemMapping.FORKS_RIGHT.value, True)
+                            else:
+                                if lift:
+                                    self.write_word(ForkliftPLCMemMapping.FORKS_RIGHT.value, False)
+                                else:
+                                    self.write_word(ForkliftPLCMemMapping.LIFT.value, True)
+                else:
+                    at_middle = self.read_bool(ForkliftPLCMemMapping.AT_MIDDLE.value)
+                    lift = self.read_bool(ForkliftPLCMemMapping.LIFT.value)
+                    if at_middle:
+                        if lift:
+                            self.write_bool(ForkliftPLCMemMapping.FORKS_RIGHT.value, True)
+                        else:
+                            conveyor_plc.send_bool(ConveyorPLCMemMapping.FORKLIFT_BUSY.value & 0xFFFF, False)
+                            self._status = ForkliftStatus.IDLE
+                    else:
+                        if lift:
+                            self.write_bool(ForkliftPLCMemMapping.LIFT.value, False)
+                        else:
+                            self.write_bool(ForkliftPLCMemMapping.FORKS_RIGHT.value, False)
+                sleep(FORKLIFT_TIMER)
+            except BrokenPipeError:
+                conveyor_plc.reconnect()
+        conveyor_plc.close()
+        sync_thread.join()

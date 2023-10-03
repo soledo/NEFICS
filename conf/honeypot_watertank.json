@@ -16,7 +16,7 @@
                 "handler": "HoneyHandler",
                 "guid": 1, "in": [], "out": [],
                 "parameters": {
-                    "honeyconf": "conf/honeypot.conf"
+                    "honeyconf": "conf/honeypot_watertank.conf"
                 }
             },
             "routes": [["default", "192.168.0.1"]]
@@ -29,6 +29,13 @@
             "routes": [["default", "192.168.0.1"]]
         },
         {
+            "name": "hmi",
+            "interfaces": [
+                {"name": "eth0", "ip": "10.0.0.5/24", "switch": "s2"}
+            ],
+            "routes": [["default", "10.0.0.250"]]
+        },
+        {
             "name" : "allen1756",
             "interfaces" : [
                 {"name" : "eth0", "ip" : "10.0.0.10/24", "switch" : "s2"}
@@ -36,7 +43,7 @@
             "routes" : [["default", "10.0.0.250"]],
             "launcher" : {
                 "module" : "honeypot",
-                "device" : "PLCDevice",
+                "device" : "WaterTankPLC",
                 "handler" : "PLCHandler",
                 "guid" : 10, "in" : [], "out": [],
                 "parameters" : {
