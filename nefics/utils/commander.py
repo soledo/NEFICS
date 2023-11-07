@@ -7,18 +7,19 @@ from time import sleep
 from prompt_toolkit.shortcuts import run_application
 from PyInquirer.prompts.list import question
 from netifaces import AF_LINK, AF_INET, ifaddresses, interfaces
+from random import randint
 from scapy.sendrecv import sr1
 from scapy.layers.l2 import ARP
-import ipaddress
+from ipaddress import ip_network, IPv4Address, IPv4Network
 
 # NEFICS imports
-from nefics.IEC104.dissector import APDU
-from iec104 import IEC104, get_command
+from nefics.protos.iec10x.packets import APDU
+from nefics.protos.iec10x.util import time56
 
 IEC104_PORT = 2404
 
 if __name__ == '__main__':
-    iface = run_application(
+    iface : str = run_application(
         question(
             'Choose an interface ',
             choices=[f'{x:s} ({ifaddresses(x)[AF_INET][0]["addr"]:s})' for x in interfaces() if AF_INET in ifaddresses(x)]
@@ -26,12 +27,12 @@ if __name__ == '__main__':
     )
     iface = iface.split(' ')[0]
     print('[+] Using ' + str(iface))
-    address = ifaddresses(iface)[AF_INET][0]
-    subnet = ipaddress.ip_network(address['addr'] + '/' + address['netmask'], strict=False)
-    nethosts = list(subnet.hosts())
+    address : dict[str, str] = ifaddresses(iface)[AF_INET][0]
+    subnet : IPv4Network = ip_network(address['addr'] + '/' + address['netmask'], strict=False)
+    nethosts : list[IPv4Address] = list(subnet.hosts())
     print('[+] Searching for live hosts in {0:s} ...'.format(str(subnet)))
-    alive = []
-    def arpscan(hosts: list):
+    alive : list[str] = list()
+    def arpscan(hosts: list[IPv4Address]):
         global alive
         global address
         for host in hosts:
@@ -41,7 +42,7 @@ if __name__ == '__main__':
                 if response is not None and response.haslayer('ARP') and response['ARP'].op == 0x2:
                     print('   [!] {0:s} is alive'.format(str(host)))
                     alive.append(str(host))
-    threads = []
+    threads : list[Thread] = []
     for hosts in [nethosts[i:i + 16] for i in range(0, len(nethosts), 16)]:
         t = Thread(target=arpscan, kwargs={'hosts': hosts})
         t.start()
@@ -55,7 +56,7 @@ if __name__ == '__main__':
     rtus = []
     for host in alive:
         if host != address['addr']:
-            sport = scapy.RandShort()
+            sport = randint(1025,65535)
             print('[-] Trying {0:s} ...\r'.format(host), end='')
             response = scapy.sr1(scapy.IP(src=address['addr'], dst=host)/scapy.TCP(sport=sport, dport=IEC104_PORT, flags='S'), iface=iface, timeout=0.1, retry=0, verbose=0)
             if response is None:

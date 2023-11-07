@@ -5,6 +5,8 @@ import argparse
 import sys
 from tqdm import tqdm
 
+NMAP_ARGS : str = '-Pn -n -sS -sV -O -p 1-10240'
+
 def main():
     aparser = argparse.ArgumentParser()
     aparser.add_argument('ip')
@@ -15,7 +17,8 @@ def main():
     nm = nmap3.Nmap()
     results = []
     for i in tqdm(range(scans), unit='scans'):
-        r = nm.nmap_os_detection(ip_addr)
+        r = nm.scan_command(ip_addr, NMAP_ARGS)
+        r = nm.parser.os_identifier_parser(r)
         for rr in r[ip_addr]['osmatch']:
             results.append((rr['name'], rr['accuracy']))
     print('\r\n')

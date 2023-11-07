@@ -22,13 +22,22 @@ MAX_LENGTH : int           = 260   # APCI -> 5, MAX ASDU -> 255
 MAX_QUEUE : int            = 256
 DATATR_WAIT : float        = 0.40
 ICMD_WAIT : float          = 0.10
-SUPPORTED_ASDU : list[int] = [45, 46, 49, 58, 59, 62, 100, 102]
+SUPPORTED_ASDU : list[int] = [45, 46, 49, 50, 58, 59, 62, 63, 100, 102]
 
 # Definition of timeouts (IEC60870-5-104 section 9.6)
 TIMEOUT_T0 = 30
 TIMEOUT_T1 = 15
 TIMEOUT_T2 = 10
 TIMEOUT_T3 = 20
+
+# Memory mappings
+# Total memory:         0x00000 - 0x3FFFF
+# Boolean read-only:    0x00000 - 0x0FFFF
+# Boolean read-write:   0x10000 - 0x1FFFF
+# Word read-only:       0x20000 - 0x27FFF
+# Float read-only:      0x28000 - 0x2FFFF
+# Word read-write:      0x30000 - 0x37FFF
+# Float read-write:     0x38000 - 0x3FFFF
 
 class ControlledState(Enum):
     STOPPED = 0
@@ -85,19 +94,7 @@ class IEC104Handler(Thread):
     def _validate_memory(self):
         device : IEDBase = self._device
         for addr in range(0, 0x3FFFF):
-            if (
-                addr < 0x20000
-                and device.check_addr(addr & 0x30000, addr & 0xFFFF, 1)
-            ) or (
-                addr == 0x20000
-                and device.check_addr(0x20000, 0, 1)
-                and device.check_addr(0x20000, 1, 1)
-            ) or (
-                addr > 0x20000
-                and (addr - 1) not in self._mem_map
-                and device.check_addr(addr & 0x30000, addr & 0xFFFF, 1)
-                and device.check_addr((addr + 1) & 0x30000, (addr + 1) & 0xFFFF, 1)
-            ):
+            if device.check_addr(addr & 0x30000, addr & 0xFFFF, 1):
                 self._mem_map.append(addr)
 
     def _data_transfer(self):
@@ -114,10 +111,14 @@ class IEC104Handler(Thread):
                         value = 0x01 if device.read_bool(addr) else 0x00 # Determine SPI
                         asdu_type = 0x1e # single-point information with time tag CP56Time2a
                         io = IO30(_sq=0, _number=1, _balanced=False, IOA=addr, SIQ=value, time=time56())
-                    else: # Measured value
+                    elif addr in range(0x20000, 0x28000) or addr in range(0x30000, 0x38000): # Measured value (int)
                         value = device.read_word(addr)
                         asdu_type = 0x23 # Measured value, scaled value with time tag CP56Time2a
                         io = IO35(_sq=0, _number=1, _balanced=False, IOA=addr, SVA=value, time=time56())
+                    elif addr in range(0x28000, 0x30000) or addr in range(0x38000, 0x40000): # Measured value (float)
+                        value = device.read_ieee_float(addr)
+                        asdu_type = 0x24 # Measured value, short floating point number with time tag CP56Time2a
+                        io = IO36(_sq=0, _number=1, _balanced=False, IOA=addr, value=value, time=time56())
                     apdu /= ASDU(
                         type=asdu_type, 
                         VSQ=VSQ(SQ=0, number=1),
@@ -194,7 +195,7 @@ class IEC104Handler(Thread):
         currtime : CP56Time2a = time56()
         cot_flags : int
         if select: # SELECT
-            if self._selected_for_operation is not None or ioa < 0x10000 or ioa >= 0x20000:
+            if self._selected_for_operation is not None or ioa not in range(0x10000,0x20000):
                 # Check if:
                 # - there is a previously selected object for operation
                 # - IOA is not in the boolean read-write memory region [0x10000-0x1FFFF]
@@ -238,7 +239,7 @@ class IEC104Handler(Thread):
             cot = 10 # ActTerm
         else:
             if select: # SELECT
-                if self._selected_for_operation is not None or ioa < 0x10000 or ioa >= 0x20000:
+                if self._selected_for_operation is not None or ioa not in range(0x10000, 0x20000):
                     # Check if:
                     # - there is a previously selected object for operation
                     # - IOA is not in the boolean read-write memory region [0x10000-0x1FFFF]
@@ -278,10 +279,10 @@ class IEC104Handler(Thread):
         currtime : CP56Time2a = time56()
         cot_flags : int
         if select: # SELECT
-            if self._selected_for_operation is not None or ioa < 0x30000 or ioa >= 0x3FFFF:
+            if self._selected_for_operation is not None or ioa not in range(0x30000, 0x38000):
                 # Check if:
                 # - there is a previously selected object for operation
-                # - IOA is not in the WORD read-write memory region [0x30000-0x3FFFE]
+                # - IOA is not in the WORD read-write memory region [0x30000-0x37FFF]
                 cot_flags = 0b01 # Negative
                 cot = 10 # ActTerm
             else:
@@ -307,6 +308,45 @@ class IEC104Handler(Thread):
         asdu = ASDU(type=atype, VSQ=vsq, COT_flags=cot_flags, COT=cot, CommonAddress=self._device.guid, IO=io)
         self._send_queue.put(APDU()/APCI(type=0x00)/asdu)
 
+    def _handle_IO50_IO63(self, apdu : APDU):
+        'Handle C_SE_NC_1 (set point command, short floating point number) and C_SE_TC_1 (Set-point command with time tag CP56Time2a, short floating point number)'
+        select : bool = apdu['ASDU'].IO.SE == 0b1
+        value : float = apdu['ASDU'].IO.value
+        ioa : int = apdu['ASDU'].IO.IOA
+        cot : int
+        cot_flags : int
+        atype : int
+        vsq : VSQ = VSQ(SQ=0, number=1)
+        currtime : CP56Time2a = time56()
+        if select: # SELECT
+            if self._selected_for_operation is not None or ioa not in range(0x38000, 0x40000):
+                # Check if:
+                # - there is a previously selected object for operation
+                # - IOA is not in the FLOAT read-write memory region [0x38000-0x3FFFF]
+                cot_flags = 0b01 # Negative
+                cot = 10 # ActTerm
+            else:
+                cot_flags = 0b00
+                cot = 7 # ActCon
+                self._selected_for_operation = int(ioa)
+        else: # EXECUTE
+            if self._selected_for_operation == int(ioa):
+                # Correct IOA for operation
+                self._device.write_ieee_float(ioa, value)
+                cot_flags = 0b00
+                cot = 7 # ActCon
+            else:
+                cot_flags = 0b01
+                cot = 10 # ActTerm
+            self._selected_for_operation = None
+        if isinstance(apdu, IO50):
+            io = IO50(_sq=0, _number=1, _balanced=False, IOA=ioa, value=value, SE=int(select))
+            atype=0x32
+        else:
+            io = IO63(_sq=0, _number=1, _balanced=False, IOA=ioa, value=value, SE=int(select), time=currtime)
+        asdu = ASDU(type=atype, VSQ=vsq, COT_flags=cot_flags, COT=cot, CommonAddress=self._device.guid, IO=io)
+        self._send_queue.put(APDU()/APCI(type=0x00)/asdu)
+
     def _handle_IO100(self, apdu : APDU):
         'Handle C_IC_NA_1 (Interrogation Command)'
         device = self._device
@@ -320,13 +360,17 @@ class IEC104Handler(Thread):
         for addr in self._mem_map:
             asdu_type : int
             if addr < 0x20000: # Boolean value
-                value = 0x01 if device.read_bool(addr) else 0x00 # Determine SPI
-                asdu_type = 0x01 # single-point information
+                value = 0b1 if device.read_bool(addr) else 0b0 # Determine SPI
+                asdu_type = 0x01 # Single-point information without time tag
                 io = IO1(_sq=0, _number=1, _balanced=False, IOA=addr, SIQ=value)
-            else: # Measured value
+            elif addr in range(0x20000, 0x28000) or addr in range(0x30000, 0x38000): # Measured value (int)
                 value = device.read_word(addr)
                 asdu_type = 0x0b # Measured value, scaled value
-                io = IO11(_sq=0, _number=1, _balanced=False, IOA=addr, value=ScaledValue(SVA=value), time=time56())
+                io = IO11(_sq=0, _number=1, _balanced=False, IOA=addr, value=ScaledValue(SVA=value))
+            elif addr in range(0x28000, 0x30000) or addr in range(0x38000, 0x40000): # Measured value (float)
+                value = device.read_ieee_float(addr)
+                asdu_type = 0x0d # Measured value, short floating point number
+                io = IO13(_sq=0, _number=1, _balanced=False, IOA=addr, value=ShortFloat(value=value))
             rasdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT=0x14, CommonAddress=device.guid & 0xFF, IO=[io])
             self._send_queue.put(APDU()/APCI(type=0x00)/rasdu, block=True, timeout=TIMEOUT_T2)
             sleep(min(ICMD_WAIT, TIMEOUT_T2/len(self._mem_map)))
@@ -340,13 +384,17 @@ class IEC104Handler(Thread):
         device = self._device
         asdu_type : int
         if req_addr < 0x20000: # Boolean value
-            value = 0x01 if device.read_bool(req_addr) else 0x00
-            asdu_type = 0x1e # Single-point information with time tag CP56Time2a
+            value = 0x01 if device.read_bool(req_addr) else 0x00 # Determine SPI
+            asdu_type = 0x1e # single-point information with time tag CP56Time2a
             io = IO30(_sq=0, _number=1, _balanced=False, IOA=req_addr, SIQ=value, time=time56())
-        else: # Measured value
+        elif req_addr in range(0x20000, 0x28000) or req_addr in range(0x30000, 0x38000): # Measured value (int)
             value = device.read_word(req_addr)
             asdu_type = 0x23 # Measured value, scaled value with time tag CP56Time2a
             io = IO35(_sq=0, _number=1, _balanced=False, IOA=req_addr, SVA=value, time=time56())
+        elif req_addr in range(0x28000, 0x30000) or req_addr in range(0x38000, 0x40000): # Measured value (float)
+            value = device.read_ieee_float(req_addr)
+            asdu_type = 0x24 # Measured value, short floating point number with time tag CP56Time2a
+            io = IO36(_sq=0, _number=1, _balanced=False, IOA=req_addr, value=value, time=time56())
         res_asdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=5, CommonAddress=device.guid & 0xFF, IO=io)
         self._send_queue.put(APDU()/APCI(type=0x00)/res_asdu, block=True, timeout=TIMEOUT_T2)
 
@@ -357,9 +405,11 @@ class IEC104Handler(Thread):
             (45, 6) : self._handle_IO45_IO58, # Single command (Act)
             (46 ,6) : self._handle_IO46_IO59, # Double command (Act)
             (49, 6) : self._handle_IO49_IO62, # Set-point command, scaled value (Act)
+            (50, 6) : self._handle_IO50_IO63, # Set-point command, short floating point number (Act)
             (58, 6) : self._handle_IO45_IO58, # Single command with time tag CP56Time2a (Act)
             (59, 6) : self._handle_IO46_IO59, # Double command with time tag CP56Time2a (Act)
             (62, 6) : self._handle_IO49_IO62, # Set-point command, scaled value with time tag CP56Time2a (Act)
+            (63, 6) : self._handle_IO50_IO63, # Set-point command with time tag CP56Time2a, short floating point number (Act)
             (100, 6) : self._handle_IO100,    # Interrogation command (Act)
             (102, 5) : self._handle_IO102,    # Read command (req)
         }
