@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from socket import socket, AF_INET, SOCK_STREAM, IPPROTO_TCP
+from socket import socket, AF_INET, SOCK_STREAM, IPPROTO_TCP, SHUT_RDWR
 from datetime import datetime
 from time import sleep
 from typing import Optional
@@ -47,7 +47,7 @@ class RTUHandler(DeviceHandler):
             for hnd in self._handlers:
                 hnd.terminate = True
                 hnd.join(1)
-        listening_sock.shutdown()
+        listening_sock.shutdown(SHUT_RDWR)
         listening_sock.close()
         self._device.join()
 
@@ -81,7 +81,7 @@ class Source(SimpleRTU):
                         FloatArg0=self._voltage
                     )
                 else:
-                    self._log(f'Received a NEFICS message not supported by simplepowergrid.Source from {addr}: {repr(message)}')
+                    self.log(f'Received a NEFICS message not supported by simplepowergrid.Source from {addr}: {repr(message)}')
                     pkt = NEFICSMSG(
                         SenderID=self.guid,
                         ReceiverID=message.SenderID,
@@ -146,9 +146,9 @@ class Transmission(SimpleRTU):
                     self._vin = message.FloatArg0
                     pkt = None
                 elif message.MessageID == MESSAGE_ID['MSG_GREQ'] and isinput:
-                    if all(x is not None for x in [self._load, self._rload]):
+                    if all(isinstance(x, float) for x in [self._load, self._rload]):
                         pkt.MessageID = MESSAGE_ID['MSG_TREQ']
-                        pkt.FloatArg0 = self._load + self._rload
+                        pkt.FloatArg0 = self._load + self._rload # type: ignore
                     else:
                         pkt.MessageID = MESSAGE_ID['MSG_NRDY']
                 elif message.MessageID == MESSAGE_ID['MSG_TREQ'] and not isinput:
@@ -168,7 +168,7 @@ class Transmission(SimpleRTU):
             pkts : list[NEFICSMSG] = list()
             # Request output load
             dstid : int = list(self._n_out_addr.keys())[0]
-            addrs.append(self._n_out_addr[dstid])
+            addrs.append(self._n_out_addr[dstid]) # type: ignore
             pkts.append(NEFICSMSG(
                 SenderID=self.guid,
                 ReceiverID=dstid,
@@ -176,7 +176,7 @@ class Transmission(SimpleRTU):
             ))
             # Request input voltage
             dstid : int = list(self._n_in_addr.keys())[0]
-            addrs.append(self._n_in_addr[dstid])
+            addrs.append(self._n_in_addr[dstid]) # type: ignore
             pkts.append(NEFICSMSG(
                 SenderID=self.guid,
                 ReceiverID=dstid,
@@ -194,7 +194,7 @@ class Transmission(SimpleRTU):
         if self._state != self._laststate:
             self._laststate = self._state
             if self._state == 0:
-                self.log('All breakers are OPEN', LOG_PRIO['WARNING'])
+                self.log('All breakers are OPEN', LOG_PRIO['WARNING']) # type: ignore
                 self._load = float('inf')
             else:
                 self._load = None
@@ -202,7 +202,7 @@ class Transmission(SimpleRTU):
                     if (self._state & (2 ** i)) > 0:    # If the current breaker is 'ON/CLOSED' ==> Corresponding load is connected
                         if self._loads[i] == 0:         # Failure condition ==> Simulate a broken breaker
                             #TODO: Failure condition
-                            self.log(f'Failure condition: short circuit detected on breaker {BREAKER_IOA_BASE + i}', LOG_PRIO['CRITICAL'])
+                            self.log(f'Failure condition: short circuit detected on breaker {BREAKER_IOA_BASE + i}', LOG_PRIO['CRITICAL']) # type: ignore
                             self._load = 0
                             break
                         else:
@@ -213,27 +213,27 @@ class Transmission(SimpleRTU):
             self._amp = 0
         elif all(x is not None for x in [self._vin, self._load, self._rload]):
             if self._rload == float('inf'):             # Failure in another substation
-                self.log('Breakers OPEN somewhere on the grid', LOG_PRIO['WARNING'])
+                self.log('Breakers OPEN somewhere on the grid', LOG_PRIO['WARNING']) # type: ignore
                 self._vout = self._vin
             else:
-                self._vout = self._vin * self._rload / (self._rload + self._load)
+                self._vout = self._vin * self._rload / (self._rload + self._load) # type: ignore
             try:
-                self._amp = (self._vin - self._vout) / self._load
+                self._amp = (self._vin - self._vout) / self._load # type: ignore
             except ZeroDivisionError:
-                self.log('Short circuit somewhere on the grid', LOG_PRIO['CRITICAL'])
+                self.log('Short circuit somewhere on the grid', LOG_PRIO['CRITICAL']) # type: ignore
                 self._amp = float('inf')                # Failure condition - Short circuit in the system ==> Current increases toward infinity
         # Update device memory
         for i in range(len(self._loads)):
             self.write_bool(BREAKER_IOA_BASE + i, (2 ** i) & self._state > 0)
-        self.write_ieee_float(VOLTAGE_IN_IOA, self._vin)
-        self.write_ieee_float(CURRENT_IOA, self._amp)
+        self.write_ieee_float(VOLTAGE_IN_IOA, self._vin) # type: ignore
+        self.write_ieee_float(CURRENT_IOA, self._amp) # type: ignore
         sleep(0.333)
 
 # Load
 
 class Load(SimpleRTU):
 
-    def __init__(self, guid: int, neighbors_in: list[int] = ..., neighbors_out: list[int] = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int], neighbors_out: list[int], **kwargs):
         assert all(val is not None for val in [guid, neighbors_in])
         assert all(isinstance(val, int) for val in neighbors_in)
         assert len(neighbors_in) >= 1
@@ -253,7 +253,7 @@ class Load(SimpleRTU):
 
     @property
     def load(self) -> float:
-        return self._load
+        return self._load # type: ignore
     
     @load.setter
     def load(self, value: float):
@@ -287,8 +287,8 @@ class Load(SimpleRTU):
     def simulate(self):
         if all(x is not None for x in self._n_in_addr.values()):
             # Request input voltage to neighbor
-            dstid = list(self._n_in_addr.keys())[0]
-            addr = self._n_in_addr[dstid]
+            dstid : int = list(self._n_in_addr.keys())[0]
+            addr : str = self._n_in_addr[dstid] # type: ignore
             pkt = NEFICSMSG(
                 SenderID=self.guid,
                 ReceiverID=dstid,
@@ -302,11 +302,11 @@ class Load(SimpleRTU):
                 self._amp = 0
             else:
                 try:
-                    self._amp = self._vin / self.load
+                    self._amp = self._vin / self.load # type: ignore
                 except ZeroDivisionError:
                     # Short-circuit on load
-                    self.log(f'Load (GUID:{self.guid}) is in short circuit condition', LOG_PRIO['CRITICAL'])
+                    self.log(f'Load (GUID:{self.guid}) is in short circuit condition', LOG_PRIO['CRITICAL']) # type: ignore
                     self._amp = float('inf')
             # Update memory values
-            self.write_ieee_float(VOLTAGE_IN_IOA, self._vin)
+            self.write_ieee_float(VOLTAGE_IN_IOA, self._vin) # type: ignore
             self.write_ieee_float(CURRENT_IOA, self._amp)
