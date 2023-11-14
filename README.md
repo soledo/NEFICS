@@ -6,13 +6,29 @@ NEFICS aims to provide researchers with a flexible way to simulate high-fidelity
 
 Based on Mininet, NEFICS instantiates whichever devices the user specifies within the configuration file used at runtime:
 
-> `python3 -m run_nefics conf/simple_powergrid_iec104.json`
+> `python3 -m run conf/simple_powergrid_iec104.json`
+
+## NEFICS runtime
+
+```mermaid
+graph LR;
+    scenario.json --> run.py;
+    run.py --> vNetwork;
+    run.py --> vDevice;
+    vDevice --> vNetwork;
+    vDevice --> launcher.py;
+    /modules --> launcher.py;
+    launcher.py --> Handler;
+    /protos --> Handler;
+```
+
+## Sample configuration
 
 The configuration file is in JSON format and specifies the network topology of the simulation, detailing the switches and devices that Mininet will instantiate. A device configuration directive contains its name and DPID. On the other hand, each device has an identifier, network interfaces associated with any corresponding switches, a launcher configuration that determines the process to run within the device, and the network routes.
 
 *conf/simple_powergrid_iec104.json:*
 
-```
+```json
     {
         "switches": [
             {

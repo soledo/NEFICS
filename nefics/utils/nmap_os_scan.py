@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
+'''Scan a device to determine its OS.'''
 
 import nmap3
 import argparse
-import sys
 from tqdm import tqdm
 
 NMAP_ARGS : str = '-Pn -n -sS -sV -O -p 1-10240'
+'''
+- (-Pn) Don't ping the device
+- (-n) Don't resolve DNS names
+- (-sS) Do a SYN scan
+- (-sV) Check service versions
+- (-O) Detect OS
+- (-p 1-10240) Scan ports
+'''
 
 def main():
     aparser = argparse.ArgumentParser()

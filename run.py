@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+'''Main script for executing the sandbox.'''
 
 import re
 import argparse
@@ -19,6 +20,8 @@ if OS_NAME == 'posix':
     from mininet.term import makeTerm
 else:
     # Win32
+    #
+    # For Win32 platforms we need dummy imports, as mininet is not supported.
     from cmd import Cmd
 
     class Controller(object):
@@ -132,6 +135,8 @@ else:
     def makeTerm(node, title='Node', term='xterm', display=None, cmd='bash') -> (list | None):
         return []
 
+# ** Configuration directives **
+
 # Required directives
 CONFIG_DIRECTIVES_R = [
     'switches',
@@ -166,6 +171,8 @@ INTERFACE_DIRECTIVES = INTERFACE_DIRECTIVES_R + [
     'mac',
 ]
 
+# ** Helper functions **
+
 def print_error(msg: str):
     if re.match(r'[\r]?\n',msg[-2:]) is None:
         msg += '\r\n'
@@ -190,6 +197,7 @@ IP_REGEX = re.compile(r'^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$')
 check_mac = lambda mac: bool(MAC_REGEX.match(mac) is not None) if isinstance(mac, str) else False
 
 def check_ipv4(ip: str) -> bool:
+    '''Check for an IPv4 format.'''
     try:
         assert IP_REGEX.match(ip) is not None
         assert '/' in ip
@@ -201,6 +209,7 @@ def check_ipv4(ip: str) -> bool:
         return False
 
 def check_configuration(conf: dict):
+    '''Verify the launch configuration.'''
     # Check for mandatory configuration directives
     assert all(x in conf.keys() for x in CONFIG_DIRECTIVES_R), f'Missing configuration directives: {[x for x in CONFIG_DIRECTIVES_R if x not in conf.keys()]}'
     # Check configured switches
@@ -237,6 +246,7 @@ def check_configuration(conf: dict):
         assert liface['switch'] in [sw['name'] for sw in switches], f"Specified switch has not been defined: {liface['switch']}"
 
 def nefics(conf: dict):
+    '''Main function'''
     # Check configuration
     try:
         check_configuration(conf)
@@ -288,6 +298,7 @@ def nefics(conf: dict):
     c0.start()
     for sw in switches.values():
         sw.start([c0])
+    # Add local interface to its switch, if necessary
     if 'localiface' in conf.keys():
         switches[conf['localiface']['switch']].attach(conf['localiface']['iface'])
     net.pingAll()
@@ -301,8 +312,10 @@ def nefics(conf: dict):
             if isinstance(rt, list) and len(rt) == 2 and all(isinstance(r, str) for r in rt):
                 device.cmd(f'ip route add {rt[0]} via {rt[1]}')
         if 'launcher' in dev.keys():
+            # Launch a sandbox process in a new terminal in the device
             net.terms += makeTerm(devices[dev['name']], cmd=f"python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\'")
             sleep(0.5)
+    # Local terminal (Mininet host)
     localxterm = Popen(['xterm', '-display', environ['DISPLAY']], stdout=PIPE, stdin=PIPE)
     CLI(net)
     localxterm.kill()
@@ -315,9 +328,9 @@ if __name__ == '__main__':
     try:
         assert OS_NAME == 'posix'
     except AssertionError:
-        print_error(f'ERROR: NEFICS needs a POSIX system\r\n')
+        print_error(f'ERROR: NEFICS needs a POSIX system supporting Mininet.\r\n')
         sys.exit()
-    ap = argparse.ArgumentParser(description='NEFICS topology simulator')
+    ap = argparse.ArgumentParser(description='NEFICS sandbox')
     ap.add_argument('config', metavar='CONFIGURATION_FILE', type=argparse.FileType('r', encoding='utf-8'))
     config_file = ap.parse_args().config
     try:

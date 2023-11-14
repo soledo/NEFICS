@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
+'''Simple Modbus command line interface client'''
 
 from sys import argv, exit
-from socket import AF_INET, IPPROTO_TCP, SOCK_STREAM, socket, timeout
+from socket import AF_INET, IPPROTO_TCP, SOCK_STREAM, socket, timeout, inet_aton
 from typing import Union
-from netaddr import valid_ipv4
 from random import randint
 from re import compile
 from struct import pack, unpack
@@ -12,6 +12,13 @@ from scapy.contrib.modbus import *
 
 INT_RE = compile(r'^\d+$')
 FLT_RE = compile(r'^\d+[.]\d*$')
+
+def valid_ipv4(ip_addr : str) -> bool:
+    try:
+        inet_aton(ip_addr)
+        return True
+    except OSError:
+        return False
 
 class MBCLI(Cmd):
     prompt = '> '
@@ -135,6 +142,7 @@ class MBCLI(Cmd):
             response.show2()
         except AssertionError:
             print(f'Invalid address or value')
+    
     def do_exit(self, arg):
         return True
 

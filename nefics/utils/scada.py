@@ -7,7 +7,7 @@ from PyInquirer.prompts.list import question as listq
 from threading import Thread
 from cmd import Cmd
 from time import sleep
-from nefics.helper104 import *
+from nefics.utils.helper104 import *
 from nefics.IEC104.dissector import APDU, APCI
 
 BUFFER_SIZE = 512
