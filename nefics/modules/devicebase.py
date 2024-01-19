@@ -12,7 +12,7 @@ from queue import Queue
 from datetime import datetime
 from time import sleep
 from struct import pack, unpack
-from typing import Union, Optional
+from typing import Any, Callable, Union, Optional
 
 if sys.platform not in ['win32']:
     from socket import SO_REUSEPORT # type: ignore
@@ -24,6 +24,7 @@ import nefics.simproto as simproto
 try:
     gtwys = gateways()
     ipaddresses =  ifaddresses(list(gtwys['default'].values())[0][1])
+    ipnet : Optional[IPNetwork] = None
     for a in ipaddresses.values():
         if valid_ipv4(a[0]['addr']):
             ipnet = IPNetwork(f'{a[0]["addr"]}/{a[0]["netmask"]}')
@@ -77,7 +78,7 @@ class IEDBase(Thread):
         self._sock.bind(('', simproto.SIM_PORT))                                        # Bind to simulation port on all addresses
         self._sock.settimeout(0.333)                                                    # Set socket timeout (seconds)
         self._msgqueue : Queue[tuple[str, simproto.NEFICSMSG]] = Queue(maxsize=simproto.QUEUE_SIZE//simproto.DATA_LEN)          # Simulation message queue (64KB)
-        self._mem_wr_queue : Queue[tuple[function, int, Union[int, bool, float]]] = Queue()  # Device memory write request queue
+        self._mem_wr_queue : Queue[tuple[Callable, int, Union[int, bool, float]]] = Queue()  # Device memory write request queue
         device_identification_values : list[str] = ['vname', 'pcode', 'rev', 'dname', 'model']
         if 'info' in kwargs.keys() and isinstance(kwargs['info'], dict) and all(isinstance(y, str) for x in kwargs['info'].items() for y in x) and all(str(x).lower() in device_identification_values for x in kwargs['info'].keys()):
             # Custom device identification information
@@ -203,7 +204,7 @@ class IEDBase(Thread):
         '''Process memory write requests'''
         while not self._terminate:
             if not self._mem_wr_queue.empty():
-                wr_request : tuple[function, int, Union[bool, int, float]] = self._mem_wr_queue.get()
+                wr_request : tuple[Callable, int, Union[bool, int, float]] = self._mem_wr_queue.get()
                 try:
                     wr_request[0](wr_request[1], wr_request[2])
                 except AssertionError:
@@ -315,8 +316,9 @@ class IEDBase(Thread):
                 self._sock.sendto(pkt.build(), (SIM_BCAST, simproto.SIM_PORT))
             sleep(0.333)
 
-    def log(self, message:str, prio:int=LOG_PRIO['INFO']):
+    def log(self, message : str, prio : Union[str, int] = LOG_PRIO['INFO']):
         if self._logfile is not None and isinstance(self._logfile, io.TextIOBase):
+            prio = prio if isinstance(prio, int) else LOG_PRIO[prio]
             line = datetime.now().ctime()
             msg = message.replace("\n", "").replace("\r","")
             line += f'\t[{LOG_PRIO[prio]}] :: {msg}\r\n'
@@ -369,7 +371,7 @@ class DeviceHandler(Thread):
         '''Override this method!'''
         print('Override this method!')
     
-    def set_terminate(self, signum: int, stack_frame: FrameType):
+    def set_terminate(self, signum: int, stack_frame: Optional[FrameType]) -> Any:
         if signum in [SIGINT, SIGTERM]:
             self._device.terminate = True
             self._terminate = True

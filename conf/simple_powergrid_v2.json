@@ -1,0 +1,56 @@
+{
+    "switches": [
+        { "name": "s1", "dpid": 1 }
+    ],
+    "devices": [
+        {
+            "name": "hsrc",
+            "interfaces": [
+                {"name": "eth0", "mac": "68:1f:d8:9a:78:1c", "ip": "10.0.1.11/24", "switch": "s1"}
+            ],
+            "launcher": {
+                "module": "simplepowergrid_v2",
+                "device": "Source",
+                "handler": "RTUHandler",
+                "guid": 1, "in": [], "out": [2],
+                "parameters": {
+                    "voltage": 526315.79
+                }
+            },
+            "routes": [ ["default", "10.0.1.1"] ]
+        },
+        {
+            "name": "htx",
+            "interfaces": [
+                {"name": "eth0", "mac": "68:1f:d8:76:ac:09", "ip": "10.0.1.12/24", "switch": "s1"}
+            ],
+            "launcher": {
+                "module": "simplepowergrid_v2",
+                "device": "Transmission",
+                "handler": "RTUHandler",
+                "guid": 2, "in": [1], "out": [3],
+                "parameters": {
+                    "loads": [0.394737, 0.394737, 0.394737],
+                    "state": 7
+                }
+            },
+            "routes": [ ["default", "10.0.1.1"] ]
+        },
+        {
+            "name": "hld",
+            "interfaces": [
+                {"name": "eth0", "mac": "68:1f:d8:bb:a3:f1", "ip": "10.0.1.13/24", "switch": "s1"}
+            ],
+            "launcher": {
+                "module": "simplepowergrid_v2",
+                "device": "Load",
+                "handler": "RTUHandler",
+                "guid": 3, "in": [2], "out": [],
+                "parameters": {
+                    "load": 12.5
+                }
+            },
+            "routes": [ ["default", "10.0.1.1"] ]
+        }
+    ]
+}

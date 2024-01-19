@@ -4,10 +4,9 @@ import os
 import sys
 import signal
 from time import sleep
-from threading import Thread
 
 from nefics.modules.devicebase import IEDBase, DeviceHandler
-from run_nefics import print_error
+from run import print_error
 
 def launcher_main():
     from importlib import import_module

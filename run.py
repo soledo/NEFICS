@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from os import environ, name as OS_NAME
+from typing import Optional
 from ipaddress import ip_address
 from netifaces import interfaces
 from Crypto.Random.random import randint
@@ -27,7 +28,7 @@ else:
     class Controller(object):
         '''Dummy Controller'''
 
-        def start():
+        def start(self):
             pass
 
     class DefaultController(Controller):
@@ -51,10 +52,11 @@ else:
     class Host(object):
         '''Dummy Host'''
         
-        def __init__(self):
+        def __init__(self, name):
+            self.name = name
             self.intfs = dict[int,Intf]()
         
-        def cmd(self, *args, **kwargs) -> (str | None):
+        def cmd(self, *args, **kwargs) -> Optional[str]:
             return None
 
     class Link(object):
@@ -77,6 +79,11 @@ else:
     class OVSKernelSwitch(Switch):
         '''Dummy OVSKernelSwitch'''
 
+        def __init__(self, name : str) -> None:
+            self.name = name
+            self.dpid : str = 15 * '0' + '1'
+            super().__init__()
+
     class Mininet(object):
         '''Dummy Mininet'''
 
@@ -86,13 +93,13 @@ else:
             inNamespace=False,
             autoSetMacs=False, autoStaticArp=False, autoPinCpus=False,
             listenPort=None, waitConnected=False ):
-            self.terms = []
+            self.terms : list = list()
             object.__init__(self)
         
         def addController(self, name='c0', controller=None, **params) -> Controller:
             return Controller()
         
-        def addSwitch(self, name, cls=None, **params) -> Switch:
+        def addSwitch(self, name, cls=None, **params) -> OVSKernelSwitch:
             return OVSKernelSwitch(name)
         
         def addHost(self, name, cls=None, **params) -> Host:
@@ -132,8 +139,8 @@ else:
         def default(self, line):
             print_error('Dummy CLI')
 
-    def makeTerm(node, title='Node', term='xterm', display=None, cmd='bash') -> (list | None):
-        return []
+    def makeTerm(node, title='Node', term='xterm', display=None, cmd='bash') -> list:
+        return list()
 
 # ** Configuration directives **
 
@@ -265,7 +272,7 @@ def nefics(conf: dict):
                 assert f'{s["dpid"]:016x}' not in [x.dpid for x in switches.values()], f'Duplicate switch DPID: {s["dpid"]:016x}'
                 switches[s['name']] = net.addSwitch(s['name'], dpid=f'{s["dpid"]:016x}', cls=OVSKernelSwitch)
             else:
-                switches[s['name']] = net.addSwitch(s['name'], dpid=next_dpid(switches), cls=OVSKernelSwitch)
+                switches[s['name']] = net.addSwitch(s['name'], dpid=next_dpid(list(switches.values())), cls=OVSKernelSwitch)
         except AssertionError as e:
             print_error(str(e))
             sys.exit()

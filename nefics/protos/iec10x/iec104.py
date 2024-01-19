@@ -8,12 +8,12 @@ from socket import socket, AF_INET, SOCK_STREAM, IPPROTO_TCP, SOL_SOCKET, SO_ERR
 from queue import Queue, Full
 from time import sleep
 from cmd import Cmd
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 from netaddr import valid_ipv4
 from datetime import datetime
-
+# NEFICS imports
 from nefics.modules.devicebase import IEDBase
-from nefics.protos.iec10x.packets import *
+from nefics.protos.iec10x.packets import APDU, APCI, ASDU, CP56Time2a, IO, IO1, IO11, IO13, IO30, IO35, IO36, IO45, IO46, IO49, IO50, IO58, IO59, IO62, IO63, IO100, TYPEID_ASDU, ShortFloat, ScaledValue, VSQ
 from nefics.protos.iec10x.enums import ALLOWED_COT
 from nefics.protos.iec10x.util import time56
 
@@ -106,7 +106,8 @@ class IEC104Handler(Thread):
                 for addr in self._mem_map:
                     apdu : APDU = APDU()
                     apdu /= APCI(type=0x00)
-                    asdu_type : int
+                    asdu_type : Optional[int] = None
+                    io : Optional[Union[IO30, IO35, IO36]] = None
                     if addr < 0x20000: # Boolean value
                         value = 0x01 if device.read_bool(addr) else 0x00 # Determine SPI
                         asdu_type = 0x1e # single-point information with time tag CP56Time2a
@@ -119,14 +120,15 @@ class IEC104Handler(Thread):
                         value = device.read_ieee_float(addr)
                         asdu_type = 0x24 # Measured value, short floating point number with time tag CP56Time2a
                         io = IO36(_sq=0, _number=1, _balanced=False, IOA=addr, value=value, time=time56())
-                    apdu /= ASDU(
-                        type=asdu_type, 
-                        VSQ=VSQ(SQ=0, number=1),
-                        COT=0x03, # Spontaneous
-                        CommonAddress=device.guid & 0xFF,
-                        IO=[io]
-                    )
-                    self._send_queue.put(APDU(apdu.build()))
+                    if asdu_type is not None and io is not None:
+                        apdu /= ASDU(
+                            type=asdu_type, 
+                            VSQ=VSQ(SQ=0, number=1),
+                            COT=0x03, # Spontaneous
+                            CommonAddress=device.guid & 0xFF,
+                            IO=[io]
+                        )
+                        self._send_queue.put(APDU(apdu.build()))
                     sleep(min(DATATR_WAIT, TIMEOUT_T2/len(self._mem_map)))
             except BrokenPipeError:
                 alive = False
@@ -344,6 +346,7 @@ class IEC104Handler(Thread):
             atype=0x32
         else:
             io = IO63(_sq=0, _number=1, _balanced=False, IOA=ioa, value=value, SE=int(select), time=currtime)
+            atype=0x3F
         asdu = ASDU(type=atype, VSQ=vsq, COT_flags=cot_flags, COT=cot, CommonAddress=self._device.guid, IO=io)
         self._send_queue.put(APDU()/APCI(type=0x00)/asdu)
 
@@ -358,7 +361,8 @@ class IEC104Handler(Thread):
         sleep(ICMD_WAIT)
         # Add process information
         for addr in self._mem_map:
-            asdu_type : int
+            asdu_type : Optional[int] = None
+            io : Optional[Union[IO1, IO11, IO13]] = None
             if addr < 0x20000: # Boolean value
                 value = 0b1 if device.read_bool(addr) else 0b0 # Determine SPI
                 asdu_type = 0x01 # Single-point information without time tag
@@ -371,8 +375,9 @@ class IEC104Handler(Thread):
                 value = device.read_ieee_float(addr)
                 asdu_type = 0x0d # Measured value, short floating point number
                 io = IO13(_sq=0, _number=1, _balanced=False, IOA=addr, value=ShortFloat(value=value))
-            rasdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT=0x14, CommonAddress=device.guid & 0xFF, IO=[io])
-            self._send_queue.put(APDU()/APCI(type=0x00)/rasdu, block=True, timeout=TIMEOUT_T2)
+            if asdu_type is not None and io is not None:
+                rasdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT=0x14, CommonAddress=device.guid & 0xFF, IO=[io])
+                self._send_queue.put(APDU()/APCI(type=0x00)/rasdu, block=True, timeout=TIMEOUT_T2)
             sleep(min(ICMD_WAIT, TIMEOUT_T2/len(self._mem_map)))
         # Add IC (actterm) to the message queue
         rasdu = ASDU(type=100, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=10, CommonAddress=device.guid & 0xFF, IO=IO100(_sq=0, _number=1, _balanced=False, IOA=0, QOI=oio.QOI))
@@ -382,7 +387,8 @@ class IEC104Handler(Thread):
         'Handle C_RD_NA_1 (Read command)'
         req_addr = apdu['ASDU'].IO.IOA
         device = self._device
-        asdu_type : int
+        asdu_type : Optional[int] = None
+        io : Optional[Union[IO30, IO35, IO36]] = None
         if req_addr < 0x20000: # Boolean value
             value = 0x01 if device.read_bool(req_addr) else 0x00 # Determine SPI
             asdu_type = 0x1e # single-point information with time tag CP56Time2a
@@ -395,8 +401,9 @@ class IEC104Handler(Thread):
             value = device.read_ieee_float(req_addr)
             asdu_type = 0x24 # Measured value, short floating point number with time tag CP56Time2a
             io = IO36(_sq=0, _number=1, _balanced=False, IOA=req_addr, value=value, time=time56())
-        res_asdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=5, CommonAddress=device.guid & 0xFF, IO=io)
-        self._send_queue.put(APDU()/APCI(type=0x00)/res_asdu, block=True, timeout=TIMEOUT_T2)
+        if asdu_type is not None and io is not None:
+            res_asdu = ASDU(type=asdu_type, VSQ=VSQ(SQ=0, number=1), COT_flags=0b00, COT=5, CommonAddress=device.guid & 0xFF, IO=io)
+            self._send_queue.put(APDU()/APCI(type=0x00)/res_asdu, block=True, timeout=TIMEOUT_T2)
 
     def _handle_iframe(self, apdu : APDU):
         atype : int = apdu['ASDU'].type
@@ -487,7 +494,7 @@ class IEC104Handler(Thread):
 class IEC104CLI(Cmd):
     prompt = '[IEC-104]> '
 
-    def __init__(self, completekey: str = ..., stdin: typing.IO[str] | None = ..., stdout: typing.IO[str] | None = ...) -> None:
+    def __init__(self, completekey: str = 'tab', stdin: typing.IO[str] | None = None, stdout: typing.IO[str] | None = None):
         super().__init__(completekey, stdin, stdout)
         self._sock : socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
         self._device_map : dict[int, Union[int, bool]] = dict()
@@ -621,4 +628,6 @@ class IEC104CLI(Cmd):
             print(16*'=')
         except OSError:
             print(f'Not connected')
-        
+
+if __name__ == '__main__':
+    IEC104CLI().cmdloop()
