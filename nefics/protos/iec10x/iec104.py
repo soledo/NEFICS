@@ -562,7 +562,7 @@ class IEC104CLI(Cmd):
             except (BrokenPipeError, TimeoutError):
                 alive = False
     
-    def do_disconnect(self, arg):
+    def do_disconnect(self, arg : Optional[str]):
         print(f'Stopping data transmission ...', end=' ')
         self._tx_queue.put(APDU()/APCI(type=0x03, UType=0x04), block=False)
         print('OK')
@@ -612,7 +612,7 @@ class IEC104CLI(Cmd):
             stderr.write(str(e))
             stderr.flush()
     
-    def do_status(self, arg : int):
+    def do_status(self, arg : Optional[str]):
         try:
             self._sock.getsockopt(SOL_SOCKET, SO_ERROR)
             print(f'Connected to: {str(self._sock.getpeername())}')
@@ -628,6 +628,19 @@ class IEC104CLI(Cmd):
             print(16*'=')
         except OSError:
             print(f'Not connected')
+    
+    def do_exit(self, arg : Optional[str]):
+        return True
+    
+    def do_EOF(self, arg : Optional[str]):
+        return True
 
 if __name__ == '__main__':
-    IEC104CLI().cmdloop()
+    from sys import exit
+    ieccli : IEC104CLI = IEC104CLI()
+    try:
+        ieccli.cmdloop()
+    except KeyboardInterrupt:
+        ieccli.do_disconnect(None)
+        exit(0)
+
