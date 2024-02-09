@@ -37,6 +37,7 @@ except IndexError:
 
 
 BUFFER_SIZE : int = 512
+FLOAT16_SCALE : float = 1000.0
 LOG_PRIO : dict[Union[str, int], Union[str, int]]= {
     'CRITICAL': 0,
     'ERROR': 1,
@@ -160,7 +161,7 @@ class IEDBase(Thread):
         '''Read an IEEE 754 half-precision 16-bit float representation of the stored value in a given address'''
         assert address in range(0x40000)
         assert address in self._memory.keys()
-        return unpack('<e',pack('<H', self._memory[address] & 0xFFFF))[0]
+        return unpack('<e',pack('<H', self._memory[address] & 0xFFFF))[0] * FLOAT16_SCALE
     
     def _write_bool(self, address : int, value: bool):
         '''Write a boolean representation of the stored byte'''
@@ -192,7 +193,7 @@ class IEDBase(Thread):
         '''Write an IEEE 754 half-precision 16-bit float float representation of the stored value in a given address'''
         assert address in range(0x40000)
         assert address in self._memory.keys()
-        self._memory[address] = unpack('<H',pack('<e', value))[0]
+        self._memory[address] = unpack('<H',pack('<e', value / FLOAT16_SCALE))[0]
     
     def write_ieee_float(self, address : int, value : float):
         '''Queue a write request for an IEEE 754 half-precision 16-bit float value in a given address'''

@@ -42,7 +42,7 @@ class RTUHandler(DeviceHandler):
                 self._handlers.append(new_handler)
                 new_handler.start()
             except TimeoutError:
-                pass
+                continue
         while any(hnd.is_alive() for hnd in self._handlers):
             for hnd in self._handlers:
                 hnd.terminate = True
@@ -52,7 +52,7 @@ class RTUHandler(DeviceHandler):
         self._device.join()
 
 # Source (Generator)
-VOLTAGE_IOA = 0x28000 # Float read-only
+VOLTAGE_IOA = 0x28000     # Float read-only
 
 class Source(SimpleRTU):
 
