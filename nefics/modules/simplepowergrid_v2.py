@@ -124,7 +124,7 @@ class Transmission(SimpleRTU):
     
     def __str__(self) -> str:
         if all(x is not None for x in [self._vin, self._vout, self._amp, self._load, self._rload]):
-            return f'Vin:  {self._vin:6.3f} V\r\nVout: {self._vout:6.3f} V\r\nI:    {self._amp:6.3f} A\r\nBreakers: {self._state:b}\r\nR:    {self._load:6.3f} Ohm\r\nLoad: {self._rload:6.3f} Ohm\r\n'
+            return f'Vin:  {self._vin:6.3f} V\r\nVout: {self._vout:6.3f} V\r\nI:    {self._amp:6.3f} A\r\nBreakers: {self._state:0{len(self._loads)}b}\r\nR:    {self._load:6.3f} Ohm\r\nLoad: {self._rload:6.3f} Ohm\r\n'
         return 'Awaiting data from configured neighbors ...\r\n'
     
     def handle_specific(self, message: NEFICSMSG):

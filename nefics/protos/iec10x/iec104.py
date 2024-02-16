@@ -1,4 +1,39 @@
 #!/usr/bin/env python3
+'''
+IEC-60870-104 Protocol module for NEFICS.
+
+This implementation uses a three-bytes Information Object Address, compliant with the standard.
+The underlying protocol implementation defined in the 'packets' module support both the usual
+two-byte and three-byte Information Object Address, as do many devices from various manufacturers.
+
+This module provides a handler for NEFICS devices with a subset of supported ASDU types:
+- C_SC_NA_1 (45)    Single Command
+- C_DC_NA_1 (46)    Double Command
+- C_SE_NB_1 (49)    Set-point command, scaled value
+- C_SE_NC_1 (50)    Set-point command, short floating point number
+- C_SC_TA_1 (58)    Single command with time tag CP56Time2a
+- C_DC_TA_1 (59)    Double command with time tag CP56Time2a
+- C_SE_TB_1 (62)    Set-point command with time tag CP56Time2a, scaled value
+- C_SE_TC_1 (63)    Set-point command with time tag CP56Time2a, short floating point number
+- C_IC_NA_1 (100)   Interrogation command
+- C_RD_NA_1 (102)   Read command
+
+In addition to the NEFICS handler, the module provides a rudimentary CLI able to communicate
+with IEC-60870-104 devices.
+
+-----------------------------------------------------
+| Memory mappings for the emulated IEC-104 devices  |
+-----------------------------------------------------
+| Total memory              |   0x00000 - 0x3FFFF   |
+| Boolean read-only         |   0x00000 - 0x0FFFF   |
+| Boolean read-write        |   0x10000 - 0x1FFFF   |
+| Word read-only            |   0x20000 - 0x27FFF   |
+| Float read-only           |   0x28000 - 0x2FFFF   |
+| Word read-write           |   0x30000 - 0x37FFF   |
+| Float read-write          |   0x38000 - 0x3FFFF   |
+-----------------------------------------------------   
+
+'''
 
 import typing
 from sys import stderr
@@ -11,12 +46,14 @@ from cmd import Cmd
 from typing import Callable, Optional, Union
 from netaddr import valid_ipv4
 from datetime import datetime
+from inquirer import list_input, text as text_input, confirm as confirm_input
 
 # NEFICS imports
 from nefics.modules.devicebase import IEDBase
 from nefics.protos.iec10x.packets import APDU, APCI, ASDU, CP56Time2a, IO, IO1, IO11, IO13, IO30, IO35, IO36, IO45, IO46, IO49, IO50, IO58, IO59, IO62, IO63, IO100, TYPEID_ASDU, ShortFloat, ScaledValue, VSQ
 from nefics.protos.iec10x.enums import ALLOWED_COT
 from nefics.protos.iec10x.util import time56
+from numpy import isin
 
 # Various constants
 IEC104_PORT    : int       = 2404
@@ -36,14 +73,7 @@ STOPDT_WAIT : float = 5
 DATATR_WAIT : float = 0.40
 ICMD_WAIT   : float = 0.10
 
-# Memory mappings for emulated IEC-104 devices
-# Total memory:         0x00000 - 0x3FFFF
-# Boolean read-only:    0x00000 - 0x0FFFF
-# Boolean read-write:   0x10000 - 0x1FFFF
-# Word read-only:       0x20000 - 0x27FFF
-# Float read-only:      0x28000 - 0x2FFFF
-# Word read-write:      0x30000 - 0x37FFF
-# Float read-write:     0x38000 - 0x3FFFF
+
 
 class ControlledState(Enum):
     STOPPED = 0
@@ -506,11 +536,14 @@ class IEC104CLI(Cmd):
         super().__init__(completekey, stdin, stdout)
         self._sock : socket
         self._device_map : dict[int, Union[int, bool]] = dict()
+        self._device_ca : Optional[int] = None
         self._rth : Thread
         self._sth : Thread
+        self._kth : Thread
         self._alive : bool = False
         self._end_conn : bool = True
-        self._req_apdu : Union[APDU, None] = None
+        self._wait_sbo : bool = False
+        self._req_apdu : Optional[APDU] = None
         self._tx : int
         self._rx : int
         self._tx_queue : Queue[APDU] = Queue(maxsize=MAX_QUEUE)
@@ -536,10 +569,14 @@ class IEC104CLI(Cmd):
                     assert apdu.haslayer('APCI'), f'Received unknown data: {buffer}\r\n'
                     if apdu.haslayer('ASDU'):
                         asdu = apdu['ASDU']
+                        self._device_ca = asdu.CommonAddress
+                        io = asdu.IO
                         if asdu.COT == 5: # Requested
                             self._req_apdu = APDU(apdu.build())
+                        elif asdu.COT == 7: # ActCon
+                            if isinstance(io, (IO45, IO49, IO50)): # Command confirmation
+                                self._wait_sbo = False
                         else:
-                            io = asdu.IO
                             if issubclass(io.__class__, IO):
                                 self._map_io(io)
                             elif isinstance(io, list) and all(issubclass(x.__class__, IO) for x in io):
@@ -563,18 +600,24 @@ class IEC104CLI(Cmd):
                     apdu : APDU = self._tx_queue.get()
                     if apdu['APCI'].type == 0:
                         apdu['APCI'].Tx = self._tx
+                        self._tx += 1
                     if apdu['APCI'].type < 3:
                         apdu['APCI'].Rx = self._rx
                     self._sock.send(apdu.build())
-                    self._tx += 1
                 else:
                     sleep(EMPTY_WAIT)
             except (BrokenPipeError, TimeoutError):
                 self._alive = False
                 self._end_conn = True
-    
+
+    def _keep_alive(self):
+        while self._alive and not self._end_conn:
+            self._tx_queue.put(APDU()/APCI(type=0x03, UType=0x10))
+            sleep(TIMEOUT_T2)
+            
     def do_disconnect(self, arg : Optional[str]):
-        if self._alive:
+        try:
+            assert self._alive
             print(f'Stopping data transmission ...', end=' ')
             self._tx_queue.put(APDU()/APCI(type=0x03, UType=0x04), block=False)
             sleep(STOPDT_WAIT)
@@ -585,14 +628,19 @@ class IEC104CLI(Cmd):
                 self._sth.join()
             if self._rth.is_alive():
                 self._rth.join()
+            if self._kth.is_alive():
+                self._kth.join()
             self._sock.shutdown(SHUT_RDWR)
             self._sock.close()
             print('OK')
             self._alive = False
+            self._wait_sbo = False
+            self._req_apdu = None
             print(f'Clearing memory mappings ...', end=' ')
             self._device_map = dict()
+            self._device_ca = None
             print('OK')
-        else:
+        except (AssertionError, OSError):
             stderr.write(f'Not connected.\n')
             stderr.flush()
     
@@ -612,19 +660,22 @@ class IEC104CLI(Cmd):
                 self._sock.connect((addr, port))
                 self._sock.settimeout(TIMEOUT_T1)
                 print(f'Connected to: {str(self._sock.getpeername())}')
-                print(f'Starting sender/recevier threads ...', end=' ')
+                print(f'Starting sender/receiver threads ...', end=' ')
                 self._rx = 0
                 self._tx = 0
                 self._alive = True
                 self._end_conn = False
                 self._sth = Thread(target=self._sender)
                 self._rth = Thread(target=self._receiver)
+                self._kth = Thread(target=self._keep_alive)
                 self._sth.start()
                 self._rth.start()
                 print('OK')
                 print(f'Starting data transmission ...', end=' ')
                 self._tx_queue.put(APDU()/APCI(type=0x03, UType=0x01), block=False)
+                sleep(STOPDT_WAIT)
                 print(f'OK')
+                self._kth.start()
         except AssertionError as e:
             stderr.write(str(e))
             stderr.flush()
@@ -635,8 +686,10 @@ class IEC104CLI(Cmd):
     def do_status(self, arg : Optional[str]):
         try:
             assert self._alive
+            assert isinstance(self._device_ca, int)
             print(f'Connected to: {str(self._sock.getpeername())}')
             print(f'Status at {datetime.now().ctime()}:\r\n')
+            print(f'Common address: {self._device_ca:02x}')
             print(f'Rx: {self._rx:3d}\tTx: {self._tx:3d}')
             print('IOA\tValue')
             print(16*'=')
@@ -650,10 +703,141 @@ class IEC104CLI(Cmd):
         except (OSError, AssertionError):
             print(f'Not connected')
     
+    def do_control(self, arg : Optional[str]):
+        try:
+            assert self._alive, f'Not connected'
+            assert isinstance(self._device_ca, int), f'No device Common Address'
+            ioas : list[int] = [x for x in self._device_map.keys() if x in range(0x10000,0x20000) or x in range(0x30000,0x40000)]
+            ioa = list_input('Which IO would you like to control?', choices=ioas)
+            val : Union[int, bool, str, float] = self._device_map[ioa]
+            io : Union[IO45, IO49, IO50] # Single command (45), Set-point command: word(49) / float(50)
+            if isinstance(val, bool):
+                # Boolean RW -> Single command
+                print(f'IO: {ioa:6d} Status: {"ON" if val else "OFF"}')
+                if confirm_input('Toggle the current IO value?'):
+                    print(f'Selecting IO {ioa:6d} for operation')
+                    io = IO45(_sq=0, _number=1, _balanced=False,
+                        IOA=ioa,                        # IO address
+                        SE=1,                           # SELECT (1)
+                        SCS=int(not val)                # Toggle current value
+                    )
+                    asdu : ASDU = ASDU(
+                        type=0x2d,                      # 0x2D: C_SC_NA_1 (45)
+                        VSQ=VSQ(SQ=0, number=1),        # SQ=Single, Number=1 IO
+                        COT=6,                          # Act
+                        CommonAddress=self._device_ca,  # Device Common Address
+                        IO=io                           # IO
+                    )
+                    apdu : APDU = APDU()/APCI(type=0x00)/asdu # APCI Type 0x00 (I-Frame)
+                    self._wait_sbo = True
+                    self._tx_queue.put(apdu)
+                    while self._wait_sbo:
+                        print(f'\rAwaiting confirmation...', end='')
+                        sleep(DATATR_WAIT)
+                    print(f'SELECTED\n')
+                    io = IO45(_sq=0, _number=1, _balanced=False,
+                        IOA=ioa,                        # IO address
+                        SE=0,                           # EXECUTE (1)
+                        SCS=int(not val)                # Toggle current value
+                    )
+                    asdu = ASDU(
+                        type=0x2d,                      # 0x2D: C_SC_NA_1 (45)
+                        VSQ=VSQ(SQ=0, number=1),        # SQ=Single, Number=1 IO
+                        COT=6,                          # Act
+                        CommonAddress=self._device_ca,  # Device Common Address
+                        IO=io                           # IO
+                    )
+                    apdu = APDU()/APCI(type=0x00)/asdu  # APCI Type 0x00 (I-Frame)
+                    self._wait_sbo = True
+                    self._tx_queue.put(apdu)
+                    while self._wait_sbo:
+                        print(f'\rExecuting command...', end='')
+                        sleep(DATATR_WAIT)
+                    print('Done')
+            else:
+                # Word/Float RW -> Set-point command
+                print(f'IO: {ioa:6d} Value: {val}')
+                val = text_input('Enter the new value')
+                assert isinstance(val, str), f'Incorrect value: {val}'
+                val = val.strip()
+                val = float(val) if '.' in val else int(val) & 0xFFFF
+                print(f'Selecting IO {ioa:6d} for operation')
+                if isinstance(val, float):
+                    io = IO50(_sq=0, _number=1, _balanced=False,
+                        IOA=ioa,                        # IO Address
+                        value=val,                      # New value
+                        SE=1                            # SELECT (1)
+                    )
+                    asdu = ASDU(
+                        type=0x32,                      # 0x32: C_SE_NC_1 (50)
+                        VSQ=VSQ(SQ=0, number=1),        # SQ=Single, Number=1 IO
+                        COT=6,                          # Act
+                        CommonAddress=self._device_ca,  # Device Common Address
+                        IO=io                           # IO
+                    )
+                else:
+                    io = IO49(_sq=0, _number=1, _balanced=False,
+                        IOA=ioa,                        # IO Address
+                        SVA=val,                        # New value
+                        SE=1                            # SELECT(1)
+                    )
+                    asdu = ASDU(
+                        type=0x31,                      # 0x31: C_SE_NB_1 (49)
+                        VSQ=VSQ(SQ=0, number=1),        # SQ=Single, Number=1 IO
+                        COT=6,                          # Act
+                        CommonAddress=self._device_ca,  # Device Common Address
+                        IO=io                           # IO
+                    )
+                apdu = APDU()/APCI(type=0x00)/asdu      # APCI Type 0x00 (I-Frame)
+                self._wait_sbo = True
+                self._tx_queue.put(apdu)
+                while self._wait_sbo:
+                    print(f'\rAwaiting confirmation...', end='')
+                    sleep(DATATR_WAIT)
+                print(f'SELECTED\n')
+                if isinstance(val, float):
+                    io = IO50(_sq=0, _number=1, _balanced=False,
+                        IOA=ioa,                        # IO Address
+                        value=val,                      # New value
+                        SE=0                            # EXECUTE (0)
+                    )
+                    asdu = ASDU(
+                        type=0x32,                      # 0x32: C_SE_NC_1 (50)
+                        VSQ=VSQ(SQ=0, number=1),        # SQ=Single, Number=1 IO
+                        COT=6,                          # Act
+                        CommonAddress=self._device_ca,  # Device Common Address
+                        IO=io                           # IO
+                    )
+                else:
+                    io = IO49(_sq=0, _number=1, _balanced=False,
+                        IOA=ioa,                        # IO Address
+                        SVA=val,                        # New value
+                        SE=0                            # EXECUTE (0)
+                    )
+                    asdu = ASDU(
+                        type=0x31,                      # 0x31: C_SE_NB_1 (49)
+                        VSQ=VSQ(SQ=0, number=1),        # SQ=Single, Number=1 IO
+                        COT=6,                          # Act
+                        CommonAddress=self._device_ca,  # Device Common Address
+                        IO=io                           # IO
+                    )
+                apdu = APDU()/APCI(type=0x00)/asdu      # APCI Type 0x00 (I-Frame)
+                self._wait_sbo = True
+                self._tx_queue.put(apdu)
+                while self._wait_sbo:
+                    print(f'\rExecuting command...', end='')
+                    sleep(DATATR_WAIT)
+                print('Done')
+        except ValueError:
+            print(f'Incorrect value: {val}')
+        except (AssertionError, OSError) as e:
+            print(str(e))
+    
     def do_exit(self, arg : Optional[str]):
         return True
     
     def do_EOF(self, arg : Optional[str]):
+        print('')
         return True
 
 if __name__ == '__main__':
