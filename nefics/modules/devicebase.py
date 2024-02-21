@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 
-import sys
 import io
-from signal import SIGINT, SIGTERM
-from types import FrameType
-from netifaces import gateways, ifaddresses
-from netaddr import valid_ipv4, IPNetwork
-from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, SO_REUSEADDR, SO_BROADCAST, SOL_SOCKET, timeout
-from threading import Thread
-from queue import Queue
+import sys
 from datetime import datetime
-from time import sleep
+from netaddr import valid_ipv4, IPNetwork
+from netifaces import gateways, ifaddresses
+from queue import Queue
+from signal import SIGINT, SIGTERM
+from socket import socket, AF_INET, SOCK_DGRAM, IPPROTO_UDP, SO_REUSEADDR, SO_BROADCAST, SOL_SOCKET, timeout
 from struct import pack, unpack
+from threading import Thread
+from time import sleep
+from types import FrameType
 from typing import Any, Callable, Union, Optional
 
 if sys.platform not in ['win32']:
     from socket import SO_REUSEPORT # type: ignore
 
 # NEFICS imports
-import nefics.simproto as simproto
+from nefics.protos.simproto import NEFICSMSG, DATA_LEN, MESSAGE_ID, QUEUE_SIZE, SIM_PORT
 
 # Try to determine the main broadcast address
 try:
@@ -76,9 +76,9 @@ class IEDBase(Thread):
             self._sock.setsockopt(SOL_SOCKET, SO_REUSEPORT, 1)                          # Enable port reusage (unix systems)
         self._sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)                              # Enable address reuse
         self._sock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)                              # Enable broadcast
-        self._sock.bind(('', simproto.SIM_PORT))                                        # Bind to simulation port on all addresses
+        self._sock.bind(('', SIM_PORT))                                        # Bind to simulation port on all addresses
         self._sock.settimeout(0.333)                                                    # Set socket timeout (seconds)
-        self._msgqueue : Queue[tuple[str, simproto.NEFICSMSG]] = Queue(maxsize=simproto.QUEUE_SIZE//simproto.DATA_LEN)          # Simulation message queue (64KB)
+        self._msgqueue : Queue[tuple[str, NEFICSMSG]] = Queue(maxsize=QUEUE_SIZE//DATA_LEN)          # Simulation message queue (64KB)
         self._mem_wr_queue : Queue[tuple[Callable, int, Union[int, bool, float]]] = Queue()  # Device memory write request queue
         device_identification_values : list[str] = ['vname', 'pcode', 'rev', 'dname', 'model']
         if 'info' in kwargs.keys() and isinstance(kwargs['info'], dict) and all(isinstance(y, str) for x in kwargs['info'].items() for y in x) and all(str(x).lower() in device_identification_values for x in kwargs['info'].keys()):
@@ -242,22 +242,22 @@ class IEDBase(Thread):
         while not self._terminate:
             self.simulate()
 
-    def handle_specific(self, message: simproto.NEFICSMSG):
+    def handle_specific(self, message: NEFICSMSG):
         '''
         Override this method to handle incomming messages from the
         queue.
 
-        For more information on the message format, see nefics/simproto.py
+        For more information on the message format, see nefics/py
         '''
         try:
             addr = self._n_in_addr[message.SenderID] if message.SenderID in self._n_in_addr else self._n_out_addr[message.SenderID]
         except KeyError:
             addr = None
         if addr is not None:
-            pkt = simproto.NEFICSMSG(
+            pkt = NEFICSMSG(
                 SenderID=self.guid,
                 ReceiverID=message.SenderID,
-                MessageID=simproto.MESSAGE_ID['MSG_UKWN']
+                MessageID=MESSAGE_ID['MSG_UKWN']
             )
             self._sock.sendto(pkt.build(), addr)
 
@@ -275,23 +275,23 @@ class IEDBase(Thread):
         while not self._terminate:
             if not self._msgqueue.empty():
                 m_addr : str
-                m_data : simproto.NEFICSMSG
+                m_data : NEFICSMSG
                 m_addr, m_data = self._msgqueue.get()
                 if m_data.ReceiverID == self.guid:
-                    if m_data.MessageID == simproto.MESSAGE_ID['MSG_WERE']:
-                        pkt = simproto.NEFICSMSG(
+                    if m_data.MessageID == MESSAGE_ID['MSG_WERE']:
+                        pkt = NEFICSMSG(
                             SenderID=self.guid,
                             ReceiverID=m_data.SenderID,
-                            MessageID=simproto.MESSAGE_ID['MSG_ISAT']
+                            MessageID=MESSAGE_ID['MSG_ISAT']
                         )
                         self._sock.sendto(pkt.build(), m_addr)
-                    elif m_data.MessageID == simproto.MESSAGE_ID['MSG_ISAT']:
+                    elif m_data.MessageID == MESSAGE_ID['MSG_ISAT']:
                         nid = m_data.SenderID
                         if nid in self._n_in_addr and self._n_in_addr[nid] is None:
                             self._n_in_addr[nid] = m_addr
                         if nid in self._n_out_addr and self._n_out_addr[nid] is None:
                             self._n_out_addr[nid] = m_addr
-                    elif m_data.MessageID in [simproto.MESSAGE_ID['MSG_NRDY'], simproto.MESSAGE_ID['MSG_UKWN']]:
+                    elif m_data.MessageID in [MESSAGE_ID['MSG_NRDY'], MESSAGE_ID['MSG_UKWN']]:
                         continue
                     else:
                         self.handle_specific(m_data)
@@ -309,12 +309,12 @@ class IEDBase(Thread):
         '''
         while not self._terminate and any(x is None for x in list(self._n_in_addr.values()) + list(self._n_out_addr.values())):
             for nid in [x for x in self._n_in_addr.keys() if self._n_in_addr[x] is None] + [x for x in self._n_out_addr.keys() if self._n_out_addr[x] is None]:
-                pkt : simproto.NEFICSMSG = simproto.NEFICSMSG(
+                pkt : NEFICSMSG = NEFICSMSG(
                     SenderID=self._guid,
                     ReceiverID=nid,
-                    MessageID=simproto.MESSAGE_ID['MSG_WERE']
+                    MessageID=MESSAGE_ID['MSG_WERE']
                 )
-                self._sock.sendto(pkt.build(), (SIM_BCAST, simproto.SIM_PORT))
+                self._sock.sendto(pkt.build(), (SIM_BCAST, SIM_PORT))
             sleep(0.333)
 
     def log(self, message : str, prio : Union[str, int] = LOG_PRIO['INFO']):
@@ -341,10 +341,10 @@ class IEDBase(Thread):
         memwriter.start()
         while not self._terminate: # Receive incomming messages and add them to the message queue
             try:
-                msgdata : Union[bytes, simproto.NEFICSMSG]
+                msgdata : Union[bytes, NEFICSMSG]
                 msgfrom : str
                 msgdata, msgfrom = self._sock.recvfrom(BUFFER_SIZE)
-                msgdata = simproto.NEFICSMSG(msgdata)
+                msgdata = NEFICSMSG(msgdata)
                 self._msgqueue.put((msgfrom, msgdata))
             except timeout:
                 pass

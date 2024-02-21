@@ -25,7 +25,7 @@ from Crypto.Random.random import randint
 from nefics.IEC104.dissector import *
 from nefics.IEC104.ioa import *
 import nefics.modules.devicebase as devicebase
-import nefics.simproto as simproto
+import nefics.protos.simproto as simproto
 
 BASE_IOA = 1001
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 '''
-IEC-60870-104 Protocol module for NEFICS.
+IEC 60870-5-104 Protocol module for NEFICS.
 
 This implementation uses a three-bytes Information Object Address, compliant with the standard.
 The underlying protocol implementation defined in the 'packets' module support both the usual
@@ -19,7 +19,7 @@ This module provides a handler for NEFICS devices with a subset of supported ASD
 - C_RD_NA_1 (102)   Read command
 
 In addition to the NEFICS handler, the module provides a rudimentary CLI able to communicate
-with IEC-60870-104 devices.
+with IEC 60870-5-104 compliant devices.
 
 -----------------------------------------------------
 | Memory mappings for the emulated IEC-104 devices  |
@@ -32,6 +32,10 @@ with IEC-60870-104 devices.
 | Word read-write           |   0x30000 - 0x37FFF   |
 | Float read-write          |   0x38000 - 0x3FFFF   |
 -----------------------------------------------------   
+
+Depending on the Information Object value, the emulated device will store it within an 
+appropriate memory region. The assigned memory address is treated as the Information
+Object Address for all intent and purposes of the IEC-60870-104 protocol.
 
 '''
 
@@ -53,11 +57,10 @@ from nefics.modules.devicebase import IEDBase
 from nefics.protos.iec10x.packets import APDU, APCI, ASDU, CP56Time2a, IO, IO1, IO11, IO13, IO30, IO35, IO36, IO45, IO46, IO49, IO50, IO58, IO59, IO62, IO63, IO100, TYPEID_ASDU, ShortFloat, ScaledValue, VSQ
 from nefics.protos.iec10x.enums import ALLOWED_COT
 from nefics.protos.iec10x.util import time56
-from numpy import isin
 
 # Various constants
 IEC104_PORT    : int       = 2404
-MAX_LENGTH     : int       = 260   # APCI -> 5, MAX ASDU -> 255
+MAX_LENGTH     : int       = 260   # APCI -> 5 bytes, MAX ASDU -> 255 bytes := 260 total bytes
 MAX_QUEUE      : int       = 256
 SUPPORTED_ASDU : list[int] = [45, 46, 49, 50, 58, 59, 62, 63, 100, 102]
 
@@ -72,8 +75,6 @@ EMPTY_WAIT  : float = 1
 STOPDT_WAIT : float = 5
 DATATR_WAIT : float = 0.40
 ICMD_WAIT   : float = 0.10
-
-
 
 class ControlledState(Enum):
     STOPPED = 0
@@ -848,4 +849,3 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         ieccli.do_disconnect(None)
         exit(0)
-

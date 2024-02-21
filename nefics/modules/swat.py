@@ -5,19 +5,20 @@
 # security research.
 
 from dataclasses import dataclass, astuple
-from typing import Union
+from datetime import datetime
 from enum import Enum
+from math import ceil
 from netaddr import valid_ipv4
+from random import randint
+from numpy import isin
+from scapy.contrib.modbus import * # MODBUS TCP
 from socket import AF_INET, IPPROTO_TCP, SOCK_STREAM, socket, timeout
 from threading import Thread
-from datetime import datetime
 from time import sleep
-from math import ceil
-from random import randint
-from scapy.contrib.modbus import * # MODBUS TCP
+from typing import Optional, Union
 # NEFICS imports
-import nefics.simproto as simproto
-from nefics.modules.devicebase import IEDBase, DeviceHandler
+from nefics.modules.devicebase import FLOAT16_SCALE, IEDBase, DeviceHandler
+import nefics.protos.simproto as simproto
 
 # Custom simproto definitions
 simproto.MESSAGE_ID['MSG_GET'] = 6                  # Get physical value
@@ -30,10 +31,14 @@ simproto.MESSAGE_ID_MAP[0x00000008] = 'MSG_VAL'
 simproto.MESSAGE_ID_MAP[0xFFFFFFFD] = 'MSG_DND'
 # Integer arg0 -> Variable identifier
 # (Integer arg1 / Float arg0) -> values (boolean / float)
-# e.g.: 0300000004000000070000000200000001000000000000000000 -> [PLC3|PHYS|MSG_SET|P301|ON|-|-]
+# e.g.: 0300000004000000070000000300000001000000000000000000 -> [PLC3|PHYS|MSG_SET|P301|ON|-|-]
+
+from nefics.protos.simproto import NEFICSMSG, SIM_PORT
+MESSAGE_ID = simproto.MESSAGE_ID
+MESSAGE_ID_MAP = simproto.MESSAGE_ID_MAP
 
 # General device GUIDs
-SWAT_IDS = {
+SWAT_IDS : dict[Union[str, int], Union[str, int]] = {
     'PLC1': 1,
     'PLC2': 2,
     'PLC3': 3,
@@ -45,7 +50,7 @@ SWAT_IDS = {
 }
 
 # Physical status variable mapping
-PHYS_IDS = {
+PHYS_IDS : dict[Union[str, int], Union[str, int]] = {
     'MV101': 0,
     'P101': 1,
     'P201': 2,
@@ -67,18 +72,18 @@ PHYS_IDS = {
 }
 
 # Physical process definitions
-TANK_DIAMETER = 1.38            # [m]
-TANK_HEIGHT = 1.600             # [m]
-TANK_SECTION = 1.5              # [m^2]
-PUMP_FLOWRATE_IN = 2.55         # [m^3/h] spec say btw 2.2 and 2.4
-PUMP_FLOWRATE_OUT = 2.45        # [m^3/h] spec say btw 2.2 and 2.4
-PH_PUMP_FLOWRATE_IN = 0.7
-PH_PUMP_FLOWRATE_OUT = 0.7
-RESCALING_HOURS = 100
-PROCESS_TIMEOUT_S = 0.20        # physical process update rate in seconds
-PROCESS_TIMEOUT_H = (PROCESS_TIMEOUT_S / 3600.0) * RESCALING_HOURS
-PH_PERIOD_SEC = 0.05
-PH_PERIOD_HOURS = (PH_PERIOD_SEC / 3600.0) * RESCALING_HOURS
+TANK_DIAMETER        : float = 1.38                                             # [m]
+TANK_HEIGHT          : float = 1.600                                            # [m]
+TANK_SECTION         : float = 1.5                                              # [m^2]
+PUMP_FLOWRATE_IN     : float = 2.55                                             # [m^3/h] spec say between 2.2 and 2.4 ?
+PUMP_FLOWRATE_OUT    : float = 2.45                                             # [m^3/h] spec say between 2.2 and 2.4 ?
+PH_PUMP_FLOWRATE_IN  : float = 0.7
+PH_PUMP_FLOWRATE_OUT : float = 0.7
+RESCALING_HOURS      : float = 100
+PROCESS_TIMEOUT_S    : float = 0.20                                             # physical process update rate in seconds
+PROCESS_TIMEOUT_H    : float = (PROCESS_TIMEOUT_S / 3600.0) * RESCALING_HOURS
+PH_PERIOD_SEC        : float = 0.05
+PH_PERIOD_HOURS      : float = (PH_PERIOD_SEC / 3600.0) * RESCALING_HOURS
 
 # Control logic thresholds
 LIT_101_MM = {      # raw water tank [mm]
@@ -112,10 +117,15 @@ PH_201_M = {
 	'HH': 1.000
 }
 
-# MODBUS PDU Size
-# RS232 / RS485 ADU = 253 bytes + Server address (1 byte) + CRC (2 bytes) = 256 bytes.
-# TCP MODBUS ADU = 253 bytes + MBAP (7 bytes) = 260 bytes.
 MB_MAX_LEN = 260
+'''
+MODBUS PDU Size
+
+RS232 / RS485 ADU = 253 bytes + Server address (1 byte) + CRC (2 bytes) = 256 bytes
+
+TCP MODBUS ADU = 253 bytes + MBAP (7 bytes) = 260 bytes
+'''
+
 MB_WR_COIL_VAL = {
     0x0000: False,
     0xff00: True
@@ -123,6 +133,9 @@ MB_WR_COIL_VAL = {
 
 @dataclass
 class PhysicalStatus(object):
+    '''
+    Dataclass containing the physical information of the system
+    '''
 
     mv101:  bool  = False  # Motorized valve 101 status (ON/OFF)
     p101:   bool  = False  # Pump 101 status (ON/OFF)
@@ -152,7 +165,7 @@ class PhysicalStatus(object):
 
 class SWaTProcessDevice(IEDBase):
 
-    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert SWAT_IDS[guid] == 'PHYS' # This is the physical process simulation
         assert 'plc' in kwargs.keys()
@@ -207,15 +220,20 @@ class SWaTProcessDevice(IEDBase):
 
         sleep(PROCESS_TIMEOUT_S)
 
-    def handle_specific(self, message: simproto.NEFICSMSG):
+    def handle_specific(self, message: NEFICSMSG):
         if message.SenderID in self._plc_ip.keys() and message.SenderID in SWAT_IDS.keys() and message.ReceiverID == self.guid and message.IntegerArg0 in PHYS_IDS.keys():
             addr = self._plc_ip[message.SenderID]
-            pkt = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=message.SenderID)
-            sender = SWAT_IDS[message.SenderID]
             mid = message.MessageID
+            sender = SWAT_IDS[message.SenderID]
             request = PHYS_IDS[message.IntegerArg0]
-            allowed_get = []
-            allowed_set = []
+            pkt : Optional[NEFICSMSG]
+            pkt = NEFICSMSG(SenderID=self.guid, ReceiverID=message.SenderID)
+            assert isinstance(addr, str)
+            assert isinstance(mid, int)
+            assert isinstance(request, str)
+            assert isinstance(sender, str)
+            allowed_get : list[str] = list()
+            allowed_set : list[str] = list()
             # Check privileges
             if sender == 'PLC1':
                 # PLC1 is allowed to control: MV101, P101
@@ -233,16 +251,18 @@ class SWaTProcessDevice(IEDBase):
                 allowed_get += ['P301', 'LIT301']
                 allowed_set += ['P301']
             # Check operation
-            if mid == simproto.MESSAGE_ID['MSG_GET'] and request in allowed_get:
-                pkt.IntegerArg0 = PHYS_IDS[request]
-                pkt.MessageID = simproto.MESSAGE_ID['MSG_VAL']
-                value = astuple(self._status)[PHYS_IDS[request]]
+            if mid == MESSAGE_ID['MSG_GET'] and request in allowed_get:
+                status_idx = PHYS_IDS[request]
+                assert isinstance(status_idx, int)
+                pkt.IntegerArg0 = status_idx
+                pkt.MessageID = MESSAGE_ID['MSG_VAL']
+                value = astuple(self._status)[status_idx]
                 value = value if isinstance(value, float) else int(value)
                 if isinstance(value, int):
                     pkt.IntegerArg1 = value
                 else:
                     pkt.FloatArg0 = value
-            elif mid == simproto.MESSAGE_ID['MSG_SET'] and request in allowed_set:
+            elif mid == MESSAGE_ID['MSG_SET'] and request in allowed_set:
                 if request == 'MV101':
                     self._status.mv101 = bool(message.IntegerArg1)
                 elif request == 'P101':
@@ -253,11 +273,11 @@ class SWaTProcessDevice(IEDBase):
                     self._status.p301 = bool(message.IntegerArg1)
                 pkt = None
             else:
-                self._log(f'Access denied for {sender}: {request}')
-                pkt.MessageID = simproto.MESSAGE_ID['MSG_DND']
+                self.log(f'Access denied for {sender}: {request}')
+                pkt.MessageID = MESSAGE_ID['MSG_DND']
             # If necessary, send response packet
             if pkt is not None:
-                self._sock.sendto(pkt.build(), (addr, simproto.SIM_PORT))
+                self._sock.sendto(pkt.build(), (addr, SIM_PORT))
 
 class SWaTProcessHandler(DeviceHandler):
 
@@ -306,13 +326,13 @@ PHYS_MODBUS = {
 
 class PLCDevice(IEDBase):
     
-    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert 'paddr' in kwargs.keys()
         assert isinstance(kwargs['paddr'], str)
         assert valid_ipv4(kwargs['paddr'])
         # Physical process pseudo-device IP address
-        self._phys_addr = (kwargs['paddr'], simproto.SIM_PORT)
+        self._phys_addr = (kwargs['paddr'], SIM_PORT)
         # MODBUS Device Identification
         self._mb_vname = kwargs['vendor_name'] if 'vendor_name' in kwargs.keys() and isinstance(kwargs['vendor_name'], str) else 'NEFICS'
         self._mb_pcode = kwargs['product_code'] if 'product_code' in kwargs.keys() and isinstance(kwargs['product_code'], str) else 'SWaT PLC'
@@ -336,14 +356,14 @@ class PLCDevice(IEDBase):
     # Physical process I/O
     def _request_value(self, id: int):
         assert id in PHYS_IDS.keys()
-        request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_GET'], IntegerArg0=id)
+        request = NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=MESSAGE_ID['MSG_GET'], IntegerArg0=id)
         self._sock.sendto(request.build(), self._phys_addr)
     
     def _set_value(self, id: int, value: int):
         assert id in PHYS_IDS.keys()
         idstr = PHYS_IDS[id]
         assert idstr in ['MV101', 'P101', 'P201', 'P301']
-        request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'], IntegerArg0=id, IntegerArg1=value)
+        request = NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=MESSAGE_ID['MSG_SET'], IntegerArg0=id, IntegerArg1=value)
         self._sock.sendto(request.build(), self._phys_addr)
 
     # MODBUS I/O
@@ -477,6 +497,7 @@ class PLCHandler(DeviceHandler):
                     continue
                 function_code = reqpdu.funcCode
                 response = ModbusADUResponse(transId=transaction_id)
+                values : list[Union[int, str]]
                 # MODBUS Indication processing
                 if function_code in [0x01, 0x02]:
                     # Read coils request / Read Discrtete Input Request
@@ -572,7 +593,7 @@ class PLCHandler(DeviceHandler):
                     address:int = reqpdu.startAddr
                     quantity:int = reqpdu.quantityOutput
                     count:int = reqpdu.byteCount
-                    values:list[int] = reqpdu.outputsValue
+                    values = reqpdu.outputsValue
                     if not ((0x0001 <= quantity and quantity <= 0x07b0) and count == ceil(float(quantity) / 8.0)): # Validate quantity
                         # Exception Response with code 0x03
                         response /= ModbusPDU0FWriteMultipleCoilsError(exceptCode=0x03)
@@ -582,9 +603,11 @@ class PLCHandler(DeviceHandler):
                     else:
                         try:
                             coilvals = 0
+                            assert isinstance(values, list)
+                            assert all(x.__class__ == int for x in values)
                             while len(values):
                                 coilvals <<= 8
-                                coilvals += values.pop()
+                                coilvals += int(values.pop())
                             for offset in range(quantity):
                                 self._device.write_coil(address + offset, bool(coilvals & 0b1))
                                 coilvals >>= 1
@@ -597,7 +620,7 @@ class PLCHandler(DeviceHandler):
                     address:int = reqpdu.startAddr
                     quantity:int = reqpdu.quantityRegisters
                     count:int = reqpdu.byteCount
-                    values:list[int] = reqpdu.outputsValue
+                    values = reqpdu.outputsValue
                     if not ((0x0001 <= quantity and quantity <= 0x007b) and count == (quantity * 2) and count == len(values)): # Validate quantity
                         # Exception Response with code 0x03
                         response /= ModbusPDU10WriteMultipleRegistersError(exceptCode=0x03)
@@ -606,8 +629,10 @@ class PLCHandler(DeviceHandler):
                         response /= ModbusPDU10WriteMultipleRegistersError(exceptCode=0x02)
                     else:
                         try:
+                            assert isinstance(values, list)
+                            assert all(isinstance(x, int) for x in values)
                             for offset in range(quantity):
-                                self._device.write_holding_register(address + offset, values[offset])
+                                self._device.write_holding_register(address + offset, int(values[offset]))
                             response /= ModbusPDU10WriteMultipleRegistersResponse(startAddr=address, quantityRegisters=quantity)
                         except AssertionError:
                             # Exception Response with code 0x04
@@ -671,7 +696,7 @@ class PLCHandler(DeviceHandler):
                             response /= ModbusPDU18ReadFIFOQueueError(exceptCode=0x02)
                         else:
                             # Read queue
-                            values:list[int] = [self._device.read_word(ModbusDatamap.HR, fifo + offset) for offset in range(1, count + 1)]
+                            values = [self._device.read_word(ModbusDatamap.HR, fifo + offset) for offset in range(1, count + 1)]
                             response /= ModbusPDU18ReadFIFOQueueResponse(FIFOCount=count, FIFOVal=values)
                     except AssertionError:
                         # Exception Response with code 0x04
@@ -695,8 +720,8 @@ class PLCHandler(DeviceHandler):
                         response /= ModbusPDU2B0EReadDeviceIdentificationError(exceptCode=0x02)
                     else:
                         respdu = ModbusPDU2B0EReadDeviceIdentificationResponse(readCode=readcode, conformityLevel=0x83, objCount=1)
-                        value = [self._device._mb_vname, self._device._mb_pcode, self._device._mb_mmrev]
-                        respdu/= ModbusObjectId(id=objectid, value=value[objectid])
+                        values = [self._device._mb_vname, self._device._mb_pcode, self._device._mb_mmrev]
+                        respdu/= ModbusObjectId(id=objectid, value=values[objectid])
                         response /= respdu
                 sock.send(response.build())
             except (timeout, BrokenPipeError) as ex:
@@ -727,7 +752,7 @@ class PLCHandler(DeviceHandler):
 
 class PLC1(PLCDevice):
 
-    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert guid == SWAT_IDS['PLC1']
         assert 'p3addr' in kwargs.keys()
@@ -737,7 +762,7 @@ class PLC1(PLCDevice):
         # Memory mappings
         self._set_memory_value('MV101', False)
         self._set_memory_value('P101', True)
-        self._set_memory_value('LIT101', 5000) # 0.5 * 1000. The register holds 2 bytes as a short int (0-65535)
+        self._set_memory_value('LIT101', 5000) # 0.5 * 10000. The register holds 2 bytes as a short int (0-65535)
         self._set_memory_value('FIT101', 0)
         # PLC3 socket
         self._p3 = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
@@ -769,9 +794,13 @@ class PLC1(PLCDevice):
         if message.SenderID == SWAT_IDS['PHYS'] and message.ReceiverID == self.guid and message.MessageID == simproto.MESSAGE_ID['MSG_VAL']:
             # PLC1 should only receive values from 'LIT101' and 'FIT101'
             phys_id = message.IntegerArg0
+            value = message.FloatArg0
+            tag = PHYS_IDS[phys_id]
+            assert isinstance(phys_id, int)
+            assert isinstance(tag, str)
+            assert isinstance(value, float)
             if phys_id in [PHYS_IDS['LIT101'], PHYS_IDS['FIT101']]:
-                value = message.FloatArg0
-                self._set_memory_value(PHYS_IDS[phys_id], int(value * 10000.0)) # Float to short int
+                self._set_memory_value(tag, int(value * FLOAT16_SCALE)) # Float to short int
     
     def simulate(self):
         # Request FIT101 and LIT101 from the physical process
@@ -783,30 +812,30 @@ class PLC1(PLCDevice):
         if len(data):
             response = ModbusADUResponse(data)
         # Control logic
-        lit101 = float(self._get_memory_value('LIT101')) / 10000.0 # Value from short int to float
+        lit101 = float(self._get_memory_value('LIT101')) / FLOAT16_SCALE # Value from short int to float
         if lit101 >= LIT_101_M['HH'] or lit101 >= LIT_101_M['H']:
             self._set_memory_value('MV101', False)
         if lit101 <= LIT_101_M['L'] or lit101 <= LIT_101_M['LL']:
             self._set_memory_value('MV101', True)
         if len(data) and 'registerVal' in response.payload.fields: # Modbus PDU response with register value (holding/input)
-            lit301 = float(response.payload.registerVal[0]) / 10000.0  # Value from short int to float
+            lit301 = float(response.payload.registerVal[0]) / FLOAT16_SCALE  # Value from short int to float
             if lit301 >= LIT_301_M['HH'] or lit301 >= LIT_301_M['H']:
                 self._set_memory_value('P101', False)
             if lit301 <= LIT_301_M['L'] or lit301 <= LIT_301_M['LL']:
                 self._set_memory_value('P101', True)
         elif 'exceptCode' in response.payload.fields: # Modbus Exception
-            self._log('MODBUS Exception while requesing LIT301 value')
+            self.log('MODBUS Exception while requesing LIT301 value')
         # Commit changes to physical process
         self._update_values()
         sleep(PROCESS_TIMEOUT_S)
 
 class PLC2(PLCDevice):
 
-    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert guid == SWAT_IDS['PLC2']
         # Memory mappings
-        self._set_memory_value('FIT201', int(PUMP_FLOWRATE_OUT * 10000.0))  # Float to short int
+        self._set_memory_value('FIT201', int(PUMP_FLOWRATE_OUT * FLOAT16_SCALE))  # Float to short int
         self._set_memory_value('PH201', 7000)                               # Float to short int
         self._set_memory_value('P201', False)
     
@@ -832,15 +861,19 @@ class PLC2(PLCDevice):
         if message.SenderID == SWAT_IDS['PHYS'] and message.ReceiverID == self.guid and message.MessageID == simproto.MESSAGE_ID['MSG_VAL']:
             # PLC2 should only receive values from 'FIT201' and 'PH201'
             phys_id = message.IntegerArg0
+            value = message.FloatArg0
+            tag = PHYS_IDS[phys_id]
+            assert isinstance(phys_id, int)
+            assert isinstance(value, float)
+            assert isinstance(tag, str)
             if phys_id in [PHYS_IDS['FIT201'], PHYS_IDS['PH201']]:
-                value = message.FloatArg0
-                self._set_memory_value(PHYS_IDS[phys_id], int(value * 10000.0)) # Float to short int
+                self._set_memory_value(tag, int(value * FLOAT16_SCALE)) # Float to short int
     
     def simulate(self):
         # Request FIT201 and PH201 from the physical process
         self._query_values()
         # Control logic
-        ph201 = float(self._get_memory_value('PH201')) / 10000.0 # Value from short int to float
+        ph201 = float(self._get_memory_value('PH201')) / FLOAT16_SCALE # Value from short int to float
         if ph201 >= PH_201_M['HH'] or ph201 >= PH_201_M['H']:
             self._set_memory_value('P201', False)
         if ph201 <= PH_201_M['LL'] or ph201 <= PH_201_M['L']:
@@ -851,7 +884,7 @@ class PLC2(PLCDevice):
 
 class PLC3(PLCDevice):
 
-    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert guid == SWAT_IDS['PLC3']
         # Memory mappings
@@ -879,13 +912,13 @@ class PLC3(PLCDevice):
             phys_id = message.IntegerArg0
             if phys_id == PHYS_IDS['LIT301']:
                 value = message.FloatArg0
-                self._set_memory_value('LIT301', int(value * 10000.0)) # Float to short int
+                self._set_memory_value('LIT301', int(value * FLOAT16_SCALE)) # Float to short int
     
     def simulate(self):
         # Request LIT301
         self._query_values()
         # Control logic
-        lit301 = float(self._get_memory_value('LIT301')) / 10000.0 # Value from short int to float
+        lit301 = float(self._get_memory_value('LIT301')) / FLOAT16_SCALE # Value from short int to float
         if lit301 >= LIT_301_M['HH'] or lit301 >= LIT_301_M['H']:
             self._set_memory_value('P301', True)
         if lit301 <= LIT_301_M['LL'] or lit301 <= LIT_301_M['L']:

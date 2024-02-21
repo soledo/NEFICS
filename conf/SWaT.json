@@ -40,31 +40,30 @@
             ]
         },
         {
-            "name": "plc1",
+            "name": "plc3",
             "interfaces": [
                 {
                     "name": "eth0",
-                    "mac": "28:63:36:09:4f:87",
-                    "ip": "192.168.1.11/24",
+                    "mac": "28:63:36:7f:3b:d1",
+                    "ip": "192.168.1.13/24",
                     "switch": "s1"
                 },
                 {
                     "name": "eth1",
-                    "mac": "28:63:36:09:4f:88",
-                    "ip": "172.16.1.11/24",
+                    "mac": "28:63:36:7f:3b:d2",
+                    "ip": "172.16.1.13/24",
                     "switch": "s2"
                 }
             ],
             "launcher": {
                 "module": "swat",
-                "device": "PLC1",
+                "device": "PLC3",
                 "handler": "PLCHandler",
-                "guid": 1,
+                "guid": 3,
                 "in": [],
                 "out": [],
                 "parameters": {
-                    "paddr": "172.16.1.10",
-                    "p3addr": "192.168.1.13"
+                    "paddr": "172.16.1.10"
                 }
             },
             "routes": [
@@ -103,30 +102,31 @@
             ]
         },
         {
-            "name": "plc3",
+            "name": "plc1",
             "interfaces": [
                 {
                     "name": "eth0",
-                    "mac": "28:63:36:7f:3b:d1",
-                    "ip": "192.168.1.13/24",
+                    "mac": "28:63:36:09:4f:87",
+                    "ip": "192.168.1.11/24",
                     "switch": "s1"
                 },
                 {
                     "name": "eth1",
-                    "mac": "28:63:36:7f:3b:d2",
-                    "ip": "172.16.1.13/24",
+                    "mac": "28:63:36:09:4f:88",
+                    "ip": "172.16.1.11/24",
                     "switch": "s2"
                 }
             ],
             "launcher": {
                 "module": "swat",
-                "device": "PLC3",
+                "device": "PLC1",
                 "handler": "PLCHandler",
-                "guid": 3,
+                "guid": 1,
                 "in": [],
                 "out": [],
                 "parameters": {
-                    "paddr": "172.16.1.10"
+                    "paddr": "172.16.1.10",
+                    "p3addr": "192.168.1.13"
                 }
             },
             "routes": [

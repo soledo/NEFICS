@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 '''Physical data transmission protocol for NEFICS.'''
 
+from scapy.fields import IEEEFloatField, LEIntField, LEIntEnumField
 from scapy.packet import Packet
-from scapy.fields import LEIntField, LEIntEnumField
-from nefics.IEC104.fields import LEFloatField
 
-SIM_PORT : int = 20202
-DATA_FMT : str = '<5I2f'
-DATA_LEN : int = 28
-QUEUE_SIZE : int = 1048576 # 1M
+SIM_PORT   : int = 20202
+DATA_FMT   : str = '<5I2f'
+DATA_LEN   : int = 28
+QUEUE_SIZE : int = 1048576
 
+
+MESSAGE_ID : dict[str, int] = {
+    'MSG_WERE': 0,              # Query the IP address of a specific device
+    'MSG_ISAT': 1,              # Reply a query for a device, providing the IP address as part of the IP stack
+    'MSG_GETV': 2,              # Request a single voltage value
+    'MSG_VOLT': 3,              # Reply a single voltage value request
+    'MSG_GREQ': 4,              # Request equivalent load
+    'MSG_TREQ': 5,              # Reply equivalent load value
+    'MSG_NRDY': 0xFFFFFFFE,     # Device not ready (Incomplete initialization)
+    'MSG_UKWN': 0xFFFFFFFF      # Unknown message received
+}
 '''
 Message ID
 
@@ -23,16 +33,6 @@ nefics.simproto.MESSAGE_ID_MAP[<Integer value>] = 'MY_NEW_MESSAGE'
 
 It is important to add the new message to both dictionaries.
 '''
-MESSAGE_ID : dict[str, int] = {
-    'MSG_WERE': 0,              # Query the IP address of a specific device
-    'MSG_ISAT': 1,              # Reply a query for a device, providing the IP address as part of the IP stack
-    'MSG_GETV': 2,              # Request a single voltage value
-    'MSG_VOLT': 3,              # Reply a single voltage value request
-    'MSG_GREQ': 4,              # Request equivalent load
-    'MSG_TREQ': 5,              # Reply equivalent load value
-    'MSG_NRDY': 0xFFFFFFFE,     # Device not ready (Incomplete initialization)
-    'MSG_UKWN': 0xFFFFFFFF      # Unknown message received
-}
 MESSAGE_ID_MAP : dict[int, str] = {
     0x00000000: 'MSG_WERE',
     0x00000001: 'MSG_ISAT',
@@ -56,6 +56,7 @@ class NEFICSMSG(Packet):
     its place.
 
     28          25            21           17             13             9            5            0
+    
     [ Sender ID | Receiver ID | Message ID | Integer arg0 | Integer arg1 | Float arg0 | Float arg1 ]
 
     '''
@@ -68,6 +69,6 @@ class NEFICSMSG(Packet):
         LEIntEnumField('MessageID', 0xFFFFFFFF, MESSAGE_ID_MAP),
         LEIntField('IntegerArg0', 0),
         LEIntField('IntegerArg1', 0),
-        LEFloatField('FloatArg0', 0.0),
-        LEFloatField('FloatArg1', 0.0)
+        IEEEFloatField('FloatArg0', 0.0),
+        IEEEFloatField('FloatArg1', 0.0)
     ]

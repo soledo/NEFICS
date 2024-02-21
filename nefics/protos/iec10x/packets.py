@@ -7,7 +7,7 @@ from scapy.packet import Packet, Padding
 from scapy.fields import (
     XBitField, XByteField, XByteEnumField, XLEShortField, ByteField,
     BitField, BitEnumField, IEEEFloatField, LEThreeBytesField,
-    LEShortField, LESignedShortField, LESignedIntField, LEX3BytesField,
+    LEShortField, LESignedShortField, LESignedIntField,
     FlagsField, PacketLenField, FieldLenField, StrLenField, PacketField,
     XStrField, MultipleTypeField, FieldListField, PacketListField,
     ConditionalField, ShortField, LenField
