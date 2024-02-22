@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 '''Main script for executing the sandbox.'''
 
-import re
 import argparse
 import json
+import os
+import re
 import sys
-from os import environ, name as OS_NAME
 from typing import Optional
 from ipaddress import ip_address
 from netifaces import interfaces
@@ -13,7 +13,7 @@ from Crypto.Random.random import randint
 from time import sleep
 from subprocess import PIPE, Popen
 # Mininet imports
-if OS_NAME == 'posix':
+if os.name == 'posix':
     # POSIX systems
     from mininet.node import Host, OVSKernelSwitch
     from mininet.cli import CLI
@@ -323,7 +323,7 @@ def nefics(conf: dict):
             net.terms += makeTerm(devices[dev['name']], cmd=f"python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\'")
             sleep(0.5)
     # Local terminal (Mininet host)
-    localxterm = Popen(['xterm', '-display', environ['DISPLAY']], stdout=PIPE, stdin=PIPE)
+    localxterm = Popen(['xterm', '-display', os.environ['DISPLAY']], stdout=PIPE, stdin=PIPE)
     CLI(net)
     localxterm.kill()
     localxterm.wait()
@@ -333,7 +333,7 @@ def nefics(conf: dict):
 
 if __name__ == '__main__':
     try:
-        assert OS_NAME == 'posix'
+        assert os.name == 'posix'
     except AssertionError:
         print_error(f'ERROR: NEFICS needs a POSIX system supporting Mininet.\r\n')
         sys.exit()
