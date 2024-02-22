@@ -10,7 +10,7 @@ from threading import Thread
 from typing import Union, Callable
 
 # NEFICS imports
-from nefics.modules.devicebase import IEDBase, DeviceHandler, ProtocolListener, LOG_PRIO
+from nefics.modules.devicebase import DeviceBase, DeviceHandler, ProtocolListener, LOG_PRIO
 from nefics.protos import http, modbus
 
 # Globals
@@ -20,7 +20,7 @@ LOOP_TIMER : float = SYNC_TIMER * 2.0
 
 # Honeypot base classes
 
-class HoneyDevice(IEDBase):
+class HoneyDevice(DeviceBase):
     # Will only hold the honeyd configuration
     
     def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
@@ -76,7 +76,7 @@ class HoneyHandler(DeviceHandler):
 
 # Scenario-agnostic PLC device and handler
 
-class PLCDevice(IEDBase):
+class PLCDevice(DeviceBase):
 
     def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)

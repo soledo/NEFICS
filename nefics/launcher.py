@@ -5,7 +5,7 @@ import sys
 import signal
 from time import sleep
 
-from nefics.modules.devicebase import IEDBase, DeviceHandler
+from nefics.modules.devicebase import DeviceBase, DeviceHandler
 from run import print_error
 
 def launcher_main():
@@ -59,7 +59,7 @@ def launcher_main():
     # Instantiate the device and assert whether it is compatible (devicebase.IEDBase)
     device = device_class(config['guid'], config['in'], config['out'], **config['parameters'])
     try:
-        assert isinstance(device, IEDBase), f'Instantiated device ({device_class.__name__}) is not supported by NEFICS\r\n'
+        assert isinstance(device, DeviceBase), f'Instantiated device ({device_class.__name__}) is not supported by NEFICS\r\n'
     except AssertionError as e:
         print_error(str(e))
         sys.exit()

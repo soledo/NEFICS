@@ -5,11 +5,11 @@ from socket import socket, AF_INET, SOCK_STREAM, IPPROTO_TCP, SHUT_RDWR
 from time import sleep
 from typing import Optional
 # NEFICS imports
-from nefics.modules.devicebase import IEDBase, DeviceHandler, LOG_PRIO
+from nefics.modules.devicebase import DeviceBase, DeviceHandler, LOG_PRIO
 from nefics.protos.iec10x.iec104 import IEC104Handler, IEC104_PORT, TIMEOUT_T1
 from nefics.protos.simproto import NEFICSMSG, MESSAGE_ID
 
-class SimpleRTU(IEDBase):
+class SimpleRTU(DeviceBase):
     'Generic RTU'
 
 class RTUHandler(DeviceHandler):

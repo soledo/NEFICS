@@ -17,7 +17,7 @@ from threading import Thread
 from time import sleep
 from typing import Optional, Union
 # NEFICS imports
-from nefics.modules.devicebase import FLOAT16_SCALE, IEDBase, DeviceHandler
+from nefics.modules.devicebase import FLOAT16_SCALE, DeviceBase, DeviceHandler
 import nefics.protos.simproto as simproto
 
 # Custom simproto definitions
@@ -163,7 +163,7 @@ class PhysicalStatus(object):
         )
         return output
 
-class SWaTProcessDevice(IEDBase):
+class SWaTProcessDevice(DeviceBase):
 
     def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
@@ -324,7 +324,7 @@ PHYS_MODBUS = {
     'PH201' : (ModbusDatamap.IR, 0x2201),
 }
 
-class PLCDevice(IEDBase):
+class PLCDevice(DeviceBase):
     
     def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)

@@ -51,7 +51,7 @@ LOG_PRIO : dict[Union[str, int], Union[str, int]]= {
     4: 'DEBUG'
 }
 
-class IEDBase(Thread):
+class DeviceBase(Thread):
     '''
     Main device class.
     
@@ -355,7 +355,7 @@ class IEDBase(Thread):
 
 class DeviceHandler(Thread):
 
-    def __init__(self, device: IEDBase):
+    def __init__(self, device: DeviceBase):
         super().__init__()
         self._device = device
         self._terminate = False

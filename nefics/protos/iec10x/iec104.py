@@ -53,7 +53,7 @@ from datetime import datetime
 from inquirer import list_input, text as text_input, confirm as confirm_input
 
 # NEFICS imports
-from nefics.modules.devicebase import IEDBase
+from nefics.modules.devicebase import DeviceBase
 from nefics.protos.iec10x.packets import APDU, APCI, ASDU, CP56Time2a, IO, IO1, IO11, IO13, IO30, IO35, IO36, IO45, IO46, IO49, IO50, IO58, IO59, IO62, IO63, IO100, TYPEID_ASDU, ShortFloat, ScaledValue, VSQ
 from nefics.protos.iec10x.enums import ALLOWED_COT
 from nefics.protos.iec10x.util import time56
@@ -83,9 +83,9 @@ class ControlledState(Enum):
 
 class IEC104Handler(Thread):
     
-    def __init__(self, *args, device : IEDBase, connection : socket, **kwargs):
+    def __init__(self, *args, device : DeviceBase, connection : socket, **kwargs):
         super().__init__(*args, **kwargs)
-        self._device : IEDBase = device
+        self._device : DeviceBase = device
         self._sock : socket = connection
         self._terminate : bool = False
         self._state : ControlledState = ControlledState.STOPPED

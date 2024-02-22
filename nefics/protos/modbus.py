@@ -12,7 +12,7 @@ from typing import Union
 from scapy.packet import Packet
 import scapy.contrib.modbus as smb
 # NEFICS imports
-from nefics.modules.devicebase import IEDBase, ProtocolListener
+from nefics.modules.devicebase import DeviceBase, ProtocolListener
 
 MODBUS_TCP_PORT = 502
 MODBUS_MAX_LENGTH = 260
@@ -61,7 +61,7 @@ class ModbusDeviceID(Enum):
 
 class ModbusHandler(Thread):
 
-    def __init__(self, *args, device : IEDBase, connection : socket, **kwargs):
+    def __init__(self, *args, device : DeviceBase, connection : socket, **kwargs):
         super().__init__(*args, **kwargs)
         self._device = device
         self._sock = connection
@@ -377,9 +377,9 @@ class ModbusHandler(Thread):
 
 class ModbusListener(ProtocolListener):
 
-    def __init__(self, *args, device : IEDBase, **kwargs):
+    def __init__(self, *args, device : DeviceBase, **kwargs):
         super().__init__(*args, **kwargs)
-        self._device : IEDBase = device
+        self._device : DeviceBase = device
         self._handlers : list[ModbusHandler] = []
     
     def run(self):

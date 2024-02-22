@@ -9,7 +9,7 @@
                 {"name": "eth0", "mac": "68:1f:d8:9a:78:1c", "ip": "10.0.1.11/24", "switch": "s1"}
             ],
             "launcher": {
-                "module": "simplepowergrid_v2",
+                "module": "simplepowergrid",
                 "device": "Source",
                 "handler": "RTUHandler",
                 "guid": 1, "in": [], "out": [2],
@@ -25,7 +25,7 @@
                 {"name": "eth0", "mac": "68:1f:d8:76:ac:09", "ip": "10.0.1.12/24", "switch": "s1"}
             ],
             "launcher": {
-                "module": "simplepowergrid_v2",
+                "module": "simplepowergrid",
                 "device": "Transmission",
                 "handler": "RTUHandler",
                 "guid": 2, "in": [1], "out": [3],
@@ -42,7 +42,7 @@
                 {"name": "eth0", "mac": "68:1f:d8:bb:a3:f1", "ip": "10.0.1.13/24", "switch": "s1"}
             ],
             "launcher": {
-                "module": "simplepowergrid_v2",
+                "module": "simplepowergrid",
                 "device": "Load",
                 "handler": "RTUHandler",
                 "guid": 3, "in": [2], "out": [],
