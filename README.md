@@ -6,7 +6,7 @@ NEFICS aims to provide researchers with a flexible way to simulate high-fidelity
 
 Based on Mininet, NEFICS instantiates whichever devices the user specifies within the configuration file used at runtime:
 
-> `python3 -m run conf/simple_powergrid_iec104.json`
+> `python3 -m run conf/simple_powergrid.json`
 
 ## NEFICS runtime
 
@@ -20,6 +20,24 @@ graph LR;
     /modules --> launcher.py;
     launcher.py --> Handler;
     /protos --> Handler;
+```
+
+With a configuration file, NEFICS will create a virtual network and instantiate any defined devices in which the launcher component will run. NEFICS will run every launcher component with the corresponding settings for it to import the designated module and instantiate a handler for the emulated device.
+
+The handler creates an instance of the emulated device, which will hold the virtual memory mapping of the device and the logic implemented in the chosen module. It will also instantiate listeners for every configured protocol and associate the corresponding mappings to the emulated device, allowing any incoming connections to interact with the emulated memory. The Handler will also take care of terminating the device and the listeners upon receiving a KILL or TERM signal.
+
+Even though we designed NEFICS to emulate complete networks, you can also emulate a single device by running the launcher directly, providing the necessary configuration either via a configuration file or as a string in the command line:
+
+* Using a configuration file: 
+
+```bash
+python3 -m nefics.launcher -c config_file.json
+```
+
+* Using a string:
+
+```bash
+python3 -m nefics.launcher -C '{"module":"simplepowergrid","device":"Source","handler":"RTUHandler","guid":1,"in":[],"out":[2],"parameters":{"voltage": 526315.79}}'
 ```
 
 ## Sample configuration
@@ -87,5 +105,5 @@ The configuration file is in JSON format and specifies the network topology of t
 }
 ```
 
-## Acknowledgements
+## Acknowledgments
 This research was possible thanks to the federal grants NIST 70NANB17H282 and DHS/AFRL FA8750-19-2-0010.

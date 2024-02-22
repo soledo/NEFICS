@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-'''Main script for executing the sandbox.'''
+'''Main script for executing NEFICS.'''
 
 import argparse
 import json
