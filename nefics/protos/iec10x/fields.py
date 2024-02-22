@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 '''Custom scapy fields for IEC-101/104'''
 
-from scapy.fields import Field, BitField, I
+from scapy.fields import Field, BitField
 from scapy.packet import Packet
 from scapy.volatile import VolatileValue, RandShort
-from typing import Callable, Optional, Tuple, Any
+from typing import Callable, Optional, Tuple, TypeVar, Any
 from struct import unpack
+
+I = TypeVar('I')
 
 class IOA(Field):
 
@@ -20,7 +22,7 @@ class IOA(Field):
             return 3
         return 2
 
-    def addfield(self, pkt: Packet, s: bytes, val: Optional[I]) -> bytes:
+    def addfield(self, pkt: Packet, s: bytes, val) -> bytes:
         if val is None:
             return s
         value : list[int]= []
