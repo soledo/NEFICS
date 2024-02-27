@@ -23,7 +23,7 @@ LOOP_TIMER : float = SYNC_TIMER * 2.0
 class HoneyDevice(DeviceBase):
     # Will only hold the honeyd configuration
     
-    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert 'honeyconf' in kwargs.keys()
         assert os.path.exists(kwargs['honeyconf'])
@@ -78,7 +78,7 @@ class HoneyHandler(DeviceHandler):
 
 class PLCDevice(DeviceBase):
 
-    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert 'phys_ip' in kwargs.keys() and isinstance(kwargs['phys_ip'], str), f'Physical process simulation IP address is missing ([phys_ip] directive not found).'
         self._html : Union[str, None] = kwargs['html'] if 'html' in kwargs.keys() and isinstance(kwargs['html'], str) else None
@@ -173,22 +173,22 @@ class PLCHandler(DeviceHandler):
 # Scenario #1 - Water tank
 
 class WaterTankPLCMemMapping(Enum):
-    TANK_LVL  : int = 0x20000
-    SET_POINT : int = 0x30000
-    VALVE_IN  : int = 0x30001
-    VALVE_OUT : int = 0x30002
+    TANK_LVL  = 0x20000
+    SET_POINT = 0x30000
+    VALVE_IN  = 0x30001
+    VALVE_OUT = 0x30002
 
 class WaterTankPhysMemMapping(Enum):
     # FactoryIO Modbus Mapping
     # -- Input Registers --
-    TANK_LVL  : int = 0x0001
+    TANK_LVL  = 0x0001
     # -- Holding Registers --
-    VALVE_IN  : int = 0x0000
-    VALVE_OUT : int = 0x0001
+    VALVE_IN  = 0x0000
+    VALVE_OUT = 0x0001
 
 class WaterTankPLC(PLCDevice):
 
-    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert 'set_point' in kwargs.keys() and isinstance(kwargs['set_point'], float), f'Missing set point ([set_point] directive not found)'
         assert kwargs['set_point'] > 0.0 and kwargs['set_point'] < 3.0, f'Set point out of range'
@@ -260,40 +260,40 @@ FORKLIFT_TIMER : float = LOOP_TIMER * 15.0
 class WarehousePhysMemMapping(Enum):
     # FactoryIO Modbus Mapping
     # -- Coils --
-    ENTRY_CONVEYOR  : int = 0x0000
-    LOAD_CONVEYOR   : int = 0x0001
-    FORKS_LEFT      : int = 0x0002
-    FORKS_RIGHT     : int = 0x0003
-    LIFT            : int = 0x0004
-    UNLOAD_CONVEYOR : int = 0x0005
-    EXIT_CONVEYOR   : int = 0x0006
+    ENTRY_CONVEYOR  = 0x0000
+    LOAD_CONVEYOR   = 0x0001
+    FORKS_LEFT      = 0x0002
+    FORKS_RIGHT     = 0x0003
+    LIFT            = 0x0004
+    UNLOAD_CONVEYOR = 0x0005
+    EXIT_CONVEYOR   = 0x0006
     # -- Direct Input --
-    AT_ENTRY  : int = 0x0000
-    AT_LOAD   : int = 0x0001
-    AT_LEFT   : int = 0x0002
-    AT_MIDDLE : int = 0x0003
-    AT_RIGHT  : int = 0x0004
-    AT_UNLOAD : int = 0x0005
-    AT_EXIT   : int = 0x0006
-    MOVING_X  : int = 0x0007
-    MOVING_Z  : int = 0x0008
+    AT_ENTRY  = 0x0000
+    AT_LOAD   = 0x0001
+    AT_LEFT   = 0x0002
+    AT_MIDDLE = 0x0003
+    AT_RIGHT  = 0x0004
+    AT_UNLOAD = 0x0005
+    AT_EXIT   = 0x0006
+    MOVING_X  = 0x0007
+    MOVING_Z  = 0x0008
     # -- Holding Registers --
-    TARGET_POSITION : int = 0x0000
+    TARGET_POSITION = 0x0000
 
 class ConveyorPLCMemMapping(Enum):
-    AT_ENTRY        : int = 0x00000
-    AT_LOAD         : int = 0x00001
-    AT_UNLOAD       : int = 0x00002
-    AT_EXIT         : int = 0x00003
-    ENTRY_CONVEYOR  : int = 0x10000
-    LOAD_CONVEYOR   : int = 0x10001
-    UNLOAD_CONVEYOR : int = 0x10002
-    EXIT_CONVEYOR   : int = 0x10003
-    FORKLIFT_BUSY   : int = 0x10004
+    AT_ENTRY        = 0x00000
+    AT_LOAD         = 0x00001
+    AT_UNLOAD       = 0x00002
+    AT_EXIT         = 0x00003
+    ENTRY_CONVEYOR  = 0x10000
+    LOAD_CONVEYOR   = 0x10001
+    UNLOAD_CONVEYOR = 0x10002
+    EXIT_CONVEYOR   = 0x10003
+    FORKLIFT_BUSY   = 0x10004
 
 class ConveyorPLC(PLCDevice):
 
-    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         self._memory[ConveyorPLCMemMapping.AT_ENTRY.value       ] = 0
         self._memory[ConveyorPLCMemMapping.AT_LOAD.value        ] = 0
@@ -362,27 +362,27 @@ class ConveyorPLC(PLCDevice):
         sync_thread.join()
 
 class ForkliftPLCMemMapping(Enum):
-    AT_LEFT           : int = 0x00000
-    AT_MIDDLE         : int = 0x00001
-    AT_RIGHT          : int = 0x00002
-    MOVING_X          : int = 0x00003
-    MOVING_Z          : int = 0x00004
-    FORKS_LEFT        : int = 0x10000
-    FORKS_RIGHT       : int = 0x10001
-    LIFT              : int = 0x10002
-    TARGET_POSITION   : int = 0x30000
-    RETRIEVE_POSITION : int = 0x30001
+    AT_LEFT           = 0x00000
+    AT_MIDDLE         = 0x00001
+    AT_RIGHT          = 0x00002
+    MOVING_X          = 0x00003
+    MOVING_Z          = 0x00004
+    FORKS_LEFT        = 0x10000
+    FORKS_RIGHT       = 0x10001
+    LIFT              = 0x10002
+    TARGET_POSITION   = 0x30000
+    RETRIEVE_POSITION = 0x30001
 
 class ForkliftStatus(Enum):
-    IDLE : int = 0
-    RECEIVING : int = 1
-    STORING : int = 2
-    RETRIEVING : int = 3
-    DELIVERING : int = 4
+    IDLE = 0
+    RECEIVING = 1
+    STORING = 2
+    RETRIEVING = 3
+    DELIVERING = 4
 
 class ForkliftPLC(PLCDevice):
 
-    def __init__(self, guid: int, neighbors_in: list = ..., neighbors_out: list = ..., **kwargs):
+    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert 'cnv_ip' in kwargs.keys() and isinstance(kwargs['cnv_ip'], str), f'Missing conveyors PLC IP address ([cnv_ip] directive not found)'
         self._conveyor_ip : str = kwargs['cnv_ip']

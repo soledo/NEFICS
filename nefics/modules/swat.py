@@ -10,7 +10,6 @@ from enum import Enum
 from math import ceil
 from netaddr import valid_ipv4
 from random import randint
-from numpy import isin
 from scapy.contrib.modbus import * # MODBUS TCP
 from socket import AF_INET, IPPROTO_TCP, SOCK_STREAM, socket, timeout
 from threading import Thread

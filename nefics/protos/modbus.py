@@ -7,7 +7,7 @@ from math import ceil
 from enum import Enum
 from threading import Thread
 from socket import socket, timeout, AF_INET, SOCK_STREAM, IPPROTO_TCP, SHUT_RDWR
-from typing import Union
+from typing import Callable, Optional
 # Scapy imports
 from scapy.packet import Packet
 import scapy.contrib.modbus as smb
@@ -26,38 +26,38 @@ MODBUS_WRITE_COIL_VALUES = {
 
 class ModbusErrorCode(Enum):
     'Modbus Exception codes'
-    ILLEGAL_FUNCTION_CODE : int = 0x01
-    ILLEGAL_DATA_ADDRESS : int = 0x02
-    ILLEGAL_DATA_VALUE : int = 0x03
-    SERVER_FAILURE : int = 0x04
-    ACKNOWLEDGE : int = 0x05
-    SERVER_BUSY : int = 0x06
-    GATEWAY_PATH_PROBLEM : int = 0x07
-    GATEWAY_NO_RESPONSE : int = 0x08
+    ILLEGAL_FUNCTION_CODE = 0x01
+    ILLEGAL_DATA_ADDRESS = 0x02
+    ILLEGAL_DATA_VALUE = 0x03
+    SERVER_FAILURE = 0x04
+    ACKNOWLEDGE = 0x05
+    SERVER_BUSY = 0x06
+    GATEWAY_PATH_PROBLEM = 0x07
+    GATEWAY_NO_RESPONSE = 0x08
 
 class ModbusMemmap(Enum):
     '''Emulated memory offsets for Modbus'''
-    DI : int = 0x00000
-    CO : int = 0x10000
-    IR : int = 0x20000
-    HR : int = 0x30000
+    DI = 0x00000
+    CO = 0x10000
+    IR = 0x20000
+    HR = 0x30000
 
 class ModbusReadCodes(Enum):
     'Modbus Device ID Read Codes'
-    BASIC : int = 0x01
-    REGULAR : int = 0x02
-    EXTENDED : int = 0x03
-    SPECIFIC : int = 0x04
+    BASIC = 0x01
+    REGULAR = 0x02
+    EXTENDED = 0x03
+    SPECIFIC = 0x04
 
 class ModbusDeviceID(Enum):
     'Modbus Device ID values'
-    VENDOR_NAME : int = 0x00
-    PRODUCT_CODE : int = 0x01
-    MAJOR_MINOR_REVISION : int = 0x02
-    VENDOR_URL : int = 0x03
-    PRODUCT_NAME : int = 0x04
-    MODEL_NAME : int = 0x05
-    USER_APP_NAME : int = 0x06
+    VENDOR_NAME = 0x00
+    PRODUCT_CODE = 0x01
+    MAJOR_MINOR_REVISION = 0x02
+    VENDOR_URL = 0x03
+    PRODUCT_NAME = 0x04
+    MODEL_NAME = 0x05
+    USER_APP_NAME = 0x06
 
 class ModbusHandler(Thread):
 
@@ -75,20 +75,21 @@ class ModbusHandler(Thread):
     def terminate(self, value : bool = False):
         self._terminate = value
     
-    def _mb_indication_RDCO_RDDI(self, function_code : int = 0x01, request_pdu : Packet = None) -> Packet:
+    def _mb_indication_RDCO_RDDI(self, function_code : int = 0x01, request_pdu : Optional[Packet] = None) -> Packet:
         '''Read coils request / Read Discrete Input Request'''
-        address : int = request_pdu.startAddr
-        quantity : int = request_pdu.quantity
-        mem_offset : ModbusMemmap = ModbusMemmap.CO if function_code == 0x01 else ModbusMemmap.DI
-        if not (0x0001 <= quantity and quantity <= 0x07d0): # Validate quantity. Up to 2000 according to protocol specifications
-            # Exception Response with code 0x03 (Illegal data value)
-            return smb.ModbusPDU01ReadCoilsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value) if function_code == 0x01 else smb.ModbusPDU02ReadDiscreteInputsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
-        elif not self._device.check_addr(mem_offset.value, address, quantity): # Validate addresses. All addresses must be mapped in the device
-            # Exception Response with code 0x02 (Illegal data address)
-            return smb.ModbusPDU01ReadCoilsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value) if function_code == 0x01 else smb.ModbusPDU02ReadDiscreteInputsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
-        else:
-            # Attempt to read coil/discrete input values
-            try:
+        try:
+            assert request_pdu is not None
+            address : int = request_pdu.startAddr
+            quantity : int = request_pdu.quantity
+            mem_offset : ModbusMemmap = ModbusMemmap.CO if function_code == 0x01 else ModbusMemmap.DI
+            if not (0x0001 <= quantity and quantity <= 0x07d0): # Validate quantity. Up to 2000 according to protocol specifications
+                # Exception Response with code 0x03 (Illegal data value)
+                return smb.ModbusPDU01ReadCoilsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value) if function_code == 0x01 else smb.ModbusPDU02ReadDiscreteInputsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
+            elif not self._device.check_addr(mem_offset.value, address, quantity): # Validate addresses. All addresses must be mapped in the device
+                # Exception Response with code 0x02 (Illegal data address)
+                return smb.ModbusPDU01ReadCoilsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value) if function_code == 0x01 else smb.ModbusPDU02ReadDiscreteInputsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
+            else:
+                # Attempt to read coil/discrete input values
                 coils = 1
                 for addr in range((mem_offset.value + address) + quantity - 1, (mem_offset.value + address) - 1, -1):
                     coils <<= 1
@@ -103,64 +104,67 @@ class ModbusHandler(Thread):
                     # All coils are in "False state"
                     status = [0x00] * ((quantity // 8) + (1 if quantity % 8 > 0 else 0))
                 return smb.ModbusPDU01ReadCoilsResponse(coilStatus=status) if function_code == 0x01 else smb.ModbusPDU02ReadDiscreteInputsResponse(inputStatus=status)
-            except AssertionError:
-                # Exception Response with code 0x04 (Serve Failure)
-                return smb.ModbusPDU01ReadCoilsError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value) if function_code == 0x01 else smb.ModbusPDU02ReadDiscreteInputsError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
+        except AssertionError:
+            # Exception Response with code 0x04 (Serve Failure)
+            return smb.ModbusPDU01ReadCoilsError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value) if function_code == 0x01 else smb.ModbusPDU02ReadDiscreteInputsError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
 
-    def _mb_indication_RDHR_RDIR(self, function_code : int = 0x03, request_pdu : Packet = None) -> Packet:
+    def _mb_indication_RDHR_RDIR(self, function_code : int = 0x03, request_pdu : Optional[Packet] = None) -> Packet:
         '''Read Holding Registers / Input Registers'''
-        address : int = request_pdu.startAddr
-        quantity : int = request_pdu.quantity
-        mem_offset : ModbusMemmap = ModbusMemmap.HR if function_code == 0x03 else ModbusMemmap.IR
-        if not (0x0001 <= quantity and quantity <= 0x7d): # Validate quantity. Up to 125 according to protocol specs
-            # Exception Response with code 0x03 (Illegal Data Value)
-            return smb.ModbusPDU03ReadHoldingRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value) if function_code == 0x03 else smb.ModbusPDU04ReadInputRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
-        elif not self._device.check_addr(mem_offset.value, address, quantity): # Validate addresses. All addresses must be mapped in the device.
-            # Exception Response with code 0x02 (Illegal Data Address)
-            return smb.ModbusPDU03ReadHoldingRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value) if function_code == 0x03 else smb.ModbusPDU04ReadInputRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
-        else:
-            try:
+        try:
+            assert request_pdu is not None
+            address : int = request_pdu.startAddr
+            quantity : int = request_pdu.quantity
+            mem_offset : ModbusMemmap = ModbusMemmap.HR if function_code == 0x03 else ModbusMemmap.IR
+            if not (0x0001 <= quantity and quantity <= 0x7d): # Validate quantity. Up to 125 according to protocol specs
+                # Exception Response with code 0x03 (Illegal Data Value)
+                return smb.ModbusPDU03ReadHoldingRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value) if function_code == 0x03 else smb.ModbusPDU04ReadInputRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
+            elif not self._device.check_addr(mem_offset.value, address, quantity): # Validate addresses. All addresses must be mapped in the device.
+                # Exception Response with code 0x02 (Illegal Data Address)
+                return smb.ModbusPDU03ReadHoldingRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value) if function_code == 0x03 else smb.ModbusPDU04ReadInputRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
+            else:
                 # Read register values
                 values = [self._device.read_word(mem_offset.value + a) for a in range(address, address + quantity)]
                 return smb.ModbusPDU03ReadHoldingRegistersResponse(registerVal=values) if function_code == 0x03 else smb.ModbusPDU04ReadInputRegistersResponse(registerVal=values)
-            except AssertionError:
-                # Exception Response with code 0x04 (Server Failure)
-                return smb.ModbusPDU03ReadHoldingRegistersError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value) if function_code == 0x03 else smb.ModbusPDU04ReadInputRegistersError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
+        except AssertionError:
+            # Exception Response with code 0x04 (Server Failure)
+            return smb.ModbusPDU03ReadHoldingRegistersError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value) if function_code == 0x03 else smb.ModbusPDU04ReadInputRegistersError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
 
-    def _mb_indication_WR_SCO(self, function_code : int = 0x05, request_pdu : smb.ModbusPDU05WriteSingleCoilRequest = None) -> Packet:
+    def _mb_indication_WR_SCO(self, function_code : int = 0x05, request_pdu : Optional[smb.ModbusPDU05WriteSingleCoilRequest] = None) -> Packet:
         '''Write Single Coil Request'''
-        address : int = request_pdu.outputAddr
-        value : int = request_pdu.outputValue
-        if value not in MODBUS_WRITE_COIL_VALUES.keys(): # Value is not 'ON' (0xFF00) or 'OFF' (0x0000)
-            # Exception Response with code 0x03 (Illegal Data Value)
-            return smb.ModbusPDU05WriteSingleCoilError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
-        elif not self._device.check_addr(ModbusMemmap.CO.value, address, 1): # Validate address
-            # Exception Response with code 0x02 (Illegal Data Address)
-            return smb.ModbusPDU05WriteSingleCoilError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
-        else:
-            try:
+        try:
+            assert request_pdu is not None
+            address : int = request_pdu.outputAddr
+            value : int = request_pdu.outputValue
+            if value not in MODBUS_WRITE_COIL_VALUES.keys(): # Value is not 'ON' (0xFF00) or 'OFF' (0x0000)
+                # Exception Response with code 0x03 (Illegal Data Value)
+                return smb.ModbusPDU05WriteSingleCoilError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
+            elif not self._device.check_addr(ModbusMemmap.CO.value, address, 1): # Validate address
+                # Exception Response with code 0x02 (Illegal Data Address)
+                return smb.ModbusPDU05WriteSingleCoilError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
+            else:
                 self._device.write_bool(ModbusMemmap.CO.value + address, MODBUS_WRITE_COIL_VALUES[value])
                 return smb.ModbusPDU05WriteSingleCoilResponse(outputAddr=address, outputValue=value)
-            except AssertionError:
-                # Exception Response with code 0x04 (Server Failure)
-                return smb.ModbusPDU05WriteSingleCoilError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
+        except AssertionError:
+            # Exception Response with code 0x04 (Server Failure)
+            return smb.ModbusPDU05WriteSingleCoilError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
 
-    def _mb_indication_WR_SHR(self, function_code : int = 0x06, request_pdu : smb.ModbusPDU06WriteSingleRegisterRequest = None) -> Packet:
+    def _mb_indication_WR_SHR(self, function_code : int = 0x06, request_pdu : Optional[smb.ModbusPDU06WriteSingleRegisterRequest] = None) -> Packet:
         '''Write Single Register Request'''
-        address : int = request_pdu.registerAddr
-        value : int = request_pdu.registerValue
-        if not self._device.check_addr(ModbusMemmap.HR.value, address, 1): # Validate address
-            # Exception Response with code 0x02 (Illegal Data Address)
-            return smb.ModbusPDU06WriteSingleRegisterError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
-        else:
-            try:
+        try:
+            assert request_pdu is not None
+            address : int = request_pdu.registerAddr
+            value : int = request_pdu.registerValue
+            if not self._device.check_addr(ModbusMemmap.HR.value, address, 1): # Validate address
+                # Exception Response with code 0x02 (Illegal Data Address)
+                return smb.ModbusPDU06WriteSingleRegisterError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
+            else:
                 self._device.write_word(ModbusMemmap.HR.value + address, value)
                 return smb.ModbusPDU06WriteSingleRegisterResponse(registerAddr=address, registerValue=value)
-            except AssertionError:
-                # Exception Response with code 0x04 (Server Failure)
-                return smb.ModbusPDU06WriteSingleRegisterError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
+        except AssertionError:
+            # Exception Response with code 0x04 (Server Failure)
+            return smb.ModbusPDU06WriteSingleRegisterError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
 
-    def _mb_indication_SerialOnly(self, function_code : int = 0x07, request_pdu : Packet = None) -> Packet:
+    def _mb_indication_SerialOnly(self, function_code : int = 0x07, request_pdu : Optional[Packet] = None) -> Packet:
         'Handle request meant for serial line only (No TCP)'
         appropriate_response : dict = {
             0x07 : smb.ModbusPDU07ReadExceptionStatusError,
@@ -171,20 +175,21 @@ class ModbusHandler(Thread):
         }
         return appropriate_response[function_code](exceptCode=ModbusErrorCode.ILLEGAL_FUNCTION_CODE.value)
 
-    def _mb_indication_WR_MCO(self, function_code : int = 0x0f, request_pdu : smb.ModbusPDU0FWriteMultipleCoilsRequest = None) -> Packet:
+    def _mb_indication_WR_MCO(self, function_code : int = 0x0f, request_pdu : Optional[smb.ModbusPDU0FWriteMultipleCoilsRequest] = None) -> Packet:
         'Write Multiple Coils Request'
-        address : int = request_pdu.startAddr
-        quantity : int = request_pdu.quantityOutput
-        count : int = request_pdu.byteCount
-        values : list[int] = request_pdu.outputsValue # Coil values are a list of bytes, with each byte representing the desired state of up to eight coils, one per bit
-        if not ((0x0001 <= quantity and quantity <= 0x07b0) and count == ceil(float(quantity) / 8.0)): # Validate quantity according to Modbus specification
-            # Exception Response with code 0x03
-            return smb.ModbusPDU0FWriteMultipleCoilsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
-        elif not self._device.check_addr(ModbusMemmap.CO.value, address, quantity): # Validate addresses. All addresses must be mapped in the device
-            # Exception Response with code 0x02
-            return smb.ModbusPDU0FWriteMultipleCoilsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
-        else:
-            try:
+        try:
+            assert request_pdu is not None
+            address : int = request_pdu.startAddr
+            quantity : int = request_pdu.quantityOutput
+            count : int = request_pdu.byteCount
+            values : list[int] = request_pdu.outputsValue # Coil values are a list of bytes, with each byte representing the desired state of up to eight coils, one per bit
+            if not ((0x0001 <= quantity and quantity <= 0x07b0) and count == ceil(float(quantity) / 8.0)): # Validate quantity according to Modbus specification
+                # Exception Response with code 0x03
+                return smb.ModbusPDU0FWriteMultipleCoilsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
+            elif not self._device.check_addr(ModbusMemmap.CO.value, address, quantity): # Validate addresses. All addresses must be mapped in the device
+                # Exception Response with code 0x02
+                return smb.ModbusPDU0FWriteMultipleCoilsError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
+            else:
                 coilvals = 0
                 while len(values):
                     coilvals <<= 8
@@ -193,44 +198,46 @@ class ModbusHandler(Thread):
                     self._device.write_bool(ModbusMemmap.CO.value + address + offset, bool(coilvals & 0b1))
                     coilvals >>= 1
                 return smb.ModbusPDU0FWriteMultipleCoilsResponse(startAddr=address, quantityOutput=quantity)
-            except AssertionError:
-                # Exception Response with code 0x04
-                return smb.ModbusPDU0FWriteMultipleCoilsError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
+        except AssertionError:
+            # Exception Response with code 0x04
+            return smb.ModbusPDU0FWriteMultipleCoilsError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
 
-    def _mb_indication_WR_MHR(self, function_code : int = 0x10, request_pdu : smb.ModbusPDU10WriteMultipleRegistersRequest = None) -> Packet:
+    def _mb_indication_WR_MHR(self, function_code : int = 0x10, request_pdu : Optional[smb.ModbusPDU10WriteMultipleRegistersRequest] = None) -> Packet:
         'Write Multiple Registers Request'
-        address : int = request_pdu.startAddr
-        quantity : int = request_pdu.quantityRegisters
-        count : int = request_pdu.byteCount
-        values : list[int] = request_pdu.outputsValue
-        if not ((0x0001 <= quantity and quantity <= 0x007b) and count == (quantity * 2) and quantity == len(values)): # Validate quantity
-            # Exception Response with code 0x03
-            return smb.ModbusPDU10WriteMultipleRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
-        elif not self._device.check_addr(ModbusMemmap.HR.value, address, quantity): # Validate addresses. All addresses must be mapped in the device.
-            # Exception Response with code 0x02
-            return smb.ModbusPDU10WriteMultipleRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
-        else:
-            try:
+        try:
+            assert request_pdu is not None
+            address : int = request_pdu.startAddr
+            quantity : int = request_pdu.quantityRegisters
+            count : int = request_pdu.byteCount
+            values : list[int] = request_pdu.outputsValue
+            if not ((0x0001 <= quantity and quantity <= 0x007b) and count == (quantity * 2) and quantity == len(values)): # Validate quantity
+                # Exception Response with code 0x03
+                return smb.ModbusPDU10WriteMultipleRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
+            elif not self._device.check_addr(ModbusMemmap.HR.value, address, quantity): # Validate addresses. All addresses must be mapped in the device.
+                # Exception Response with code 0x02
+                return smb.ModbusPDU10WriteMultipleRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
+            else:
                 for offset in range(quantity):
                     self._device.write_word(ModbusMemmap.HR.value + address + offset, values[offset])
                 return smb.ModbusPDU10WriteMultipleRegistersResponse(startAddr=address, quantityRegisters=quantity)
-            except AssertionError:
-                # Exception Response with code 0x04
-                return smb.ModbusPDU10WriteMultipleRegistersError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
+        except AssertionError:
+            # Exception Response with code 0x04
+            return smb.ModbusPDU10WriteMultipleRegistersError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
 
-    def _mb_indication_FileRecords(self, function_code : int = 0x14, request_pdu : Packet = None) -> Packet:
+    def _mb_indication_FileRecords(self, function_code : int = 0x14, request_pdu : Optional[Packet] = None) -> Packet:
         'On File records requests, respond with "Server Busy", as we are ont going to support file records'
         return smb.ModbusPDU14ReadFileRecordError(exceptCode=ModbusErrorCode.SERVER_BUSY.value) if function_code == 0x14 else smb.ModbusPDU15WriteFileRecordError(exceptCode=ModbusErrorCode.SERVER_BUSY.value)
 
-    def _mb_indication_WR_MASKHR(self, function_code : int = 0x16, request_pdu : smb.ModbusPDU16MaskWriteRegisterRequest = None) -> Packet:
+    def _mb_indication_WR_MASKHR(self, function_code : int = 0x16, request_pdu : Optional[smb.ModbusPDU16MaskWriteRegisterRequest] = None) -> Packet:
         'Mask Write Register Request'
-        address : int = request_pdu.refAddr
-        andmask : int = request_pdu.andMask
-        ormask : int = request_pdu.orMask
-        if not self._device.check_addr(ModbusMemmap.HR.value, address, 1): # Validate Address
-            # Exception Response with code 0x02
-            return smb.ModbusPDU16MaskWriteRegisterError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
         try:
+            assert request_pdu is not None
+            address : int = request_pdu.refAddr
+            andmask : int = request_pdu.andMask
+            ormask : int = request_pdu.orMask
+            if not self._device.check_addr(ModbusMemmap.HR.value, address, 1): # Validate Address
+                # Exception Response with code 0x02
+                return smb.ModbusPDU16MaskWriteRegisterError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
             current = self._device.read_word(ModbusMemmap.HR.value + address)
             self._device.write_word(ModbusMemmap.HR.value + address, ((current & andmask) | (ormask and (andmask ^ 0xffff))) & 0xffff)
             return smb.ModbusPDU16MaskWriteRegisterResponse(refAddr=address, andMask=andmask, orMask=ormask)
@@ -238,39 +245,41 @@ class ModbusHandler(Thread):
             # Exception Response with code 0x04
             return smb.ModbusPDU16MaskWriteRegisterError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
 
-    def _mb_indication_RW_MHR(self, function_code : int = 0x17, request_pdu : smb.ModbusPDU17ReadWriteMultipleRegistersRequest = None) -> Packet:
+    def _mb_indication_RW_MHR(self, function_code : int = 0x17, request_pdu : Optional[smb.ModbusPDU17ReadWriteMultipleRegistersRequest] = None) -> Packet:
         'Read/Write Multiple registers Request'
-        rd_address : int = request_pdu.readStartingAddr
-        rd_quantity : int = request_pdu.readQuantityRegisters
-        wr_address : int = request_pdu.writeStartingAddress
-        wr_quantity : int = request_pdu.writeQuantityRegisters
-        count : int = request_pdu.byteCount
-        wr_values : list[int] = request_pdu.writeRegistersValue
-        if not (0x0001 <= rd_quantity and rd_quantity <= 0x7d and 0x0001 <= wr_quantity and wr_quantity <= 0x0079 and count == (wr_quantity * 2)): # Validate quantities
-            # Exception Response with code 0x03
-            return smb.ModbusPDU17ReadWriteMultipleRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
-        elif not (self._device.check_addr(ModbusMemmap.HR.value, rd_address, rd_quantity) and self._device.check_addr(ModbusMemmap.HR.value, wr_address, wr_quantity)): # Validate addresses. All addresses must be mapped in the device, 2 bytes per requested 16-bit value
-            # Exception Response with code 0x02
-            return smb.ModbusPDU17ReadWriteMultipleRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
-        else:
-            try:
+        try:
+            assert request_pdu is not None
+            rd_address : int = request_pdu.readStartingAddr
+            rd_quantity : int = request_pdu.readQuantityRegisters
+            wr_address : int = request_pdu.writeStartingAddress
+            wr_quantity : int = request_pdu.writeQuantityRegisters
+            count : int = request_pdu.byteCount
+            wr_values : list[int] = request_pdu.writeRegistersValue
+            if not (0x0001 <= rd_quantity and rd_quantity <= 0x7d and 0x0001 <= wr_quantity and wr_quantity <= 0x0079 and count == (wr_quantity * 2)): # Validate quantities
+                # Exception Response with code 0x03
+                return smb.ModbusPDU17ReadWriteMultipleRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
+            elif not (self._device.check_addr(ModbusMemmap.HR.value, rd_address, rd_quantity) and self._device.check_addr(ModbusMemmap.HR.value, wr_address, wr_quantity)): # Validate addresses. All addresses must be mapped in the device, 2 bytes per requested 16-bit value
+                # Exception Response with code 0x02
+                return smb.ModbusPDU17ReadWriteMultipleRegistersError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
+            else:
                 # Read register values
                 values = [self._device.read_word(ModbusMemmap.HR.value + a) for a in range(rd_address, rd_address + rd_quantity)]
                 # Write register values
                 for offset in range(wr_quantity):
                     self._device.write_word(ModbusMemmap.HR.value + wr_address + offset, wr_values[offset])
                 return smb.ModbusPDU17ReadWriteMultipleRegistersResponse(registerVal=values)
-            except AssertionError:
-                # Exception Response with code 0x04
-                return smb.ModbusPDU17ReadWriteMultipleRegistersError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
+        except AssertionError:
+            # Exception Response with code 0x04
+            return smb.ModbusPDU17ReadWriteMultipleRegistersError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
 
-    def _mb_indication_FIFO_QR(self, function_code : int = 0x18, request_pdu : smb.ModbusPDU18ReadFIFOQueueRequest = None) -> Packet:
+    def _mb_indication_FIFO_QR(self, function_code : int = 0x18, request_pdu : Optional[smb.ModbusPDU18ReadFIFOQueueRequest] = None) -> Packet:
         'Read FIFO Queue Request'
-        fifo : int = request_pdu.FIFOPointerAddr
-        if not self._device.check_addr(ModbusMemmap.HR.value, fifo, 1): # Validate FIFO pointer address
-            # Exception Response with code 0x02
-            return smb.ModbusPDU18ReadFIFOQueueError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
         try:
+            assert request_pdu is not None
+            fifo : int = request_pdu.FIFOPointerAddr
+            if not self._device.check_addr(ModbusMemmap.HR.value, fifo, 1): # Validate FIFO pointer address
+                # Exception Response with code 0x02
+                return smb.ModbusPDU18ReadFIFOQueueError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
             count = self._device.read_word(ModbusMemmap.HR.value + fifo)
             if count > 31:
                 # Exception Response with code 0x03
@@ -286,41 +295,44 @@ class ModbusHandler(Thread):
             # Exception Response with code 0x04
             return smb.ModbusPDU18ReadFIFOQueueError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
 
-    def _mb_indication_EIT(self, function_code : int = 0x2b, request_pdu : smb.ModbusPDU2B0EReadDeviceIdentificationRequest = None) -> Packet:
+    def _mb_indication_EIT(self, function_code : int = 0x2b, request_pdu : Optional[smb.ModbusPDU2B0EReadDeviceIdentificationRequest] = None) -> Packet:
         'Encapsulated Interface Transport (0x2B / 0x0E) Read Device Identification'
-        readcode : int = request_pdu.readCode
         try:
+            assert request_pdu is not None
+            readcode : int = request_pdu.readCode
             ModbusReadCodes(readcode)
+            device_id : dict[int, str] = self._device.device_id
+            if readcode < ModbusReadCodes.SPECIFIC.value:
+                # Stream access available device information (codes 0x01 - 0x03)
+                respdu = smb.ModbusPDU2B0EReadDeviceIdentificationResponse(readCode=readcode, conformityLevel=0x80 + readcode, objCount=3 + (2 if readcode > ModbusReadCodes.BASIC.value else 0), nextObjId=ModbusDeviceID.VENDOR_NAME.value)
+                # BASIC values
+                respdu/= smb.ModbusObjectId(id=ModbusDeviceID.VENDOR_NAME.value, value=device_id[ModbusDeviceID.VENDOR_NAME.value])
+                respdu/= smb.ModbusObjectId(id=ModbusDeviceID.PRODUCT_CODE.value, value=device_id[ModbusDeviceID.PRODUCT_CODE.value])
+                respdu/= smb.ModbusObjectId(id=ModbusDeviceID.MAJOR_MINOR_REVISION.value, value=device_id[ModbusDeviceID.MAJOR_MINOR_REVISION.value])
+                if readcode > ModbusReadCodes.BASIC.value:
+                    # REGULAR values
+                    respdu/= smb.ModbusObjectId(id=ModbusDeviceID.PRODUCT_NAME.value, value=device_id[ModbusDeviceID.PRODUCT_NAME.value])
+                    respdu/= smb.ModbusObjectId(id=ModbusDeviceID.MODEL_NAME.value, value=device_id[ModbusDeviceID.MODEL_NAME.value])
+                return respdu
+            else:
+                objectid : int = request_pdu.objectId
+                if objectid not in device_id.keys():
+                    # Object not supported
+                    # Exception Response with code 0x02
+                    return smb.ModbusPDU2B0EReadDeviceIdentificationError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
+                # Individual access to one specific identification object
+                respdu = smb.ModbusPDU2B0EReadDeviceIdentificationResponse(readCode=readcode, conformityLevel=0x80 + readcode - 1, objCount=1, nextObjId=objectid)
+                respdu/= smb.ModbusObjectId(id=objectid, value=device_id[objectid])
+                return respdu
         except ValueError:
-            return smb.ModbusPDU2B0EReadDeviceIdentificationError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE)
-        device_id : dict[int, str] = self._device.device_id
-        if readcode < ModbusReadCodes.SPECIFIC.value:
-            # Stream access available device information (codes 0x01 - 0x03)
-            respdu = smb.ModbusPDU2B0EReadDeviceIdentificationResponse(readCode=readcode, conformityLevel=0x80 + readcode, objCount=3 + (2 if readcode > ModbusReadCodes.BASIC.value else 0), nextObjId=ModbusDeviceID.VENDOR_NAME.value)
-            # BASIC values
-            respdu/= smb.ModbusObjectId(id=ModbusDeviceID.VENDOR_NAME.value, value=device_id[ModbusDeviceID.VENDOR_NAME.value])
-            respdu/= smb.ModbusObjectId(id=ModbusDeviceID.PRODUCT_CODE.value, value=device_id[ModbusDeviceID.PRODUCT_CODE.value])
-            respdu/= smb.ModbusObjectId(id=ModbusDeviceID.MAJOR_MINOR_REVISION.value, value=device_id[ModbusDeviceID.MAJOR_MINOR_REVISION.value])
-            if readcode > ModbusReadCodes.BASIC.value:
-                # REGULAR values
-                respdu/= smb.ModbusObjectId(id=ModbusDeviceID.PRODUCT_NAME.value, value=device_id[ModbusDeviceID.PRODUCT_NAME.value])
-                respdu/= smb.ModbusObjectId(id=ModbusDeviceID.MODEL_NAME.value, value=device_id[ModbusDeviceID.MODEL_NAME.value])
-            return respdu
-        else:
-            objectid : int = request_pdu.objectId
-            if objectid not in device_id.keys():
-                # Object not supported
-                # Exception Response with code 0x02
-                return smb.ModbusPDU2B0EReadDeviceIdentificationError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_ADDRESS.value)
-            # Individual access to one specific identification object
-            respdu = smb.ModbusPDU2B0EReadDeviceIdentificationResponse(readCode=readcode, conformityLevel=0x80 + readcode - 1, objCount=1, nextObjId=objectid)
-            respdu/= smb.ModbusObjectId(id=objectid, value=device_id[objectid])
-            return respdu
+            return smb.ModbusPDU2B0EReadDeviceIdentificationError(exceptCode=ModbusErrorCode.ILLEGAL_DATA_VALUE.value)
+        except AssertionError:
+            return smb.ModbusPDU2B0EReadDeviceIdentificationError(exceptCode=ModbusErrorCode.SERVER_FAILURE.value)
 
     def run(self) -> None:
         isalive = True
         sock = self._sock
-        indication_handlers : dict[int, function] = {
+        indication_handlers : dict[int, Callable] = {
             0x01 : self._mb_indication_RDCO_RDDI,
             0x02 : self._mb_indication_RDCO_RDDI,
             0x03 : self._mb_indication_RDHR_RDIR,
