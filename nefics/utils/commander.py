@@ -161,6 +161,7 @@ def main():
         rtu_keepalive[rtu_ip] = Thread(target=keep_alive, kwargs={'ipaddr': rtu_ip})
         rtu_thread_killswitch[rtu_ip] = False
         rtu_threads[rtu_ip].start()
+        rtu_keepalive[rtu_ip].start()
     sleep(30)
     print('[+] Opening all breakers ...')
     for rtu_ip, ioas in rtu_hasbreakers.items():
