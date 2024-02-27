@@ -78,6 +78,14 @@ def handle_rtu(sock: socket, ipaddr: str):
         except (TimeoutError, KeyError, IndexError, AssertionError):
             pass
 
+def keep_alive(ipaddr: str):
+    global rtu_thread_killswitch
+    global rtu_comm
+    while not rtu_thread_killswitch[ipaddr]:
+        apdu = APDU()/APCI(type=0x03, UType=0x10)
+        rtu_comm[ipaddr].send(apdu.build())
+        sleep(10)
+
 def main():
     global address
     global alive
@@ -138,6 +146,7 @@ def main():
     rtu_comm = dict()
     rtu_data = dict()
     rtu_threads = dict()
+    rtu_keepalive = dict()
     rtu_thread_killswitch = dict()
     rtu_hasbreakers = dict()
     for rtu_ip in rtus:
@@ -149,6 +158,7 @@ def main():
         rtu_data[rtu_ip]['tx'] = 0
         rtu_data[rtu_ip]['rx'] = 0
         rtu_threads[rtu_ip] = Thread(target=handle_rtu, kwargs={'sock': sock, 'ipaddr': rtu_ip})
+        rtu_keepalive[rtu_ip] = Thread(target=keep_alive, kwargs={'ipaddr': rtu_ip})
         rtu_thread_killswitch[rtu_ip] = False
         rtu_threads[rtu_ip].start()
     sleep(30)
@@ -180,6 +190,7 @@ def main():
     for rtu_ip in rtus:
         rtu_thread_killswitch[rtu_ip] = True
         rtu_threads[rtu_ip].join()
+        rtu_keepalive[rtu_ip].join()
         try:
             # Stop data transmission
             apdu : APDU = APDU()/APCI(type=0x03, UType=0x04)
