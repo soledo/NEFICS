@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from netifaces import interfaces
-from run_nefics import check_configuration
+from run import check_configuration
 
 def test_mandatory_general():
     conf_missing = {}
