@@ -7,7 +7,7 @@ from socketserver import ThreadingMixIn
 from socket import socket
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 # NEFICS imports
-from nefics.modules.devicebase import ProtocolListener
+from nefics.modules.devicebase import DeviceBase, ProtocolListener
 
 class NEFICSHTTPServer(ThreadingMixIn, HTTPServer):
 
@@ -55,7 +55,7 @@ class HTTPHandler(SimpleHTTPRequestHandler):
                 content = self.replace_content(content)
                 self.send_response(200)
                 self.send_header('Content-Type', self.guess_type(path) if path.lower().split('.')[-1] != 'asp' else 'text/html; charset=utf-8')
-                self.send_header('Content-Length', len(content))
+                self.send_header('Content-Length', str(len(content)))
                 self.end_headers()
                 self.wfile.write(content)
         except IOError:
@@ -64,7 +64,7 @@ class HTTPHandler(SimpleHTTPRequestHandler):
 class HTTPListener(ProtocolListener):
 
     def __init__(self, *args, server_header : str = 'Python/3.0', static_dir : str = 'html/', port : int = 80, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, device=DeviceBase(guid=0), **kwargs)
         self._httpd : NEFICSHTTPServer = NEFICSHTTPServer(('', port), HTTPHandler, server_header=server_header, static_dir=static_dir)
         self._httpd.timeout = 2.0
 

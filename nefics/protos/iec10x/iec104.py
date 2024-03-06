@@ -53,7 +53,7 @@ from datetime import datetime
 from inquirer import list_input, text as text_input, confirm as confirm_input
 
 # NEFICS imports
-from nefics.modules.devicebase import DeviceBase
+from nefics.modules.devicebase import DeviceBase, DeviceHandler, ProtocolListener
 from nefics.protos.iec10x.packets import APDU, APCI, ASDU, CP56Time2a, IO, IO1, IO11, IO13, IO30, IO35, IO36, IO45, IO46, IO49, IO50, IO58, IO59, IO62, IO63, IO100, TYPEID_ASDU, ShortFloat, ScaledValue, VSQ
 from nefics.protos.iec10x.enums import ALLOWED_COT
 from nefics.protos.iec10x.util import time56
@@ -81,13 +81,11 @@ class ControlledState(Enum):
     STARTED = 1
     PENDING = 2
 
-class IEC104Handler(Thread):
+class IEC104Handler(DeviceHandler):
     
     def __init__(self, *args, device : DeviceBase, connection : socket, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._device : DeviceBase = device
+        super().__init__(*args, device, **kwargs)
         self._sock : socket = connection
-        self._terminate : bool = False
         self._state : ControlledState = ControlledState.STOPPED
         self._tx : int = 0
         self._rx : int = 0
@@ -97,14 +95,6 @@ class IEC104Handler(Thread):
         self._send_queue : Queue[APDU] = Queue(maxsize=MAX_QUEUE)
         self._validate_memory()
         self._sock.settimeout(TIMEOUT_T1)
-    
-    @property
-    def terminate(self) -> bool:
-        return self._terminate
-    
-    @terminate.setter
-    def terminate(self, value : bool = False):
-        self._terminate = value
     
     @property
     def rx(self) -> int:
@@ -530,6 +520,35 @@ class IEC104Handler(Thread):
         sender.join()
         self._sock.close()
         
+class IEC104Listener(ProtocolListener):
+
+    def __init__(self, *args, device: DeviceBase, **kwargs):
+        super().__init__(*args, device=device, **kwargs)
+        self._handlers : list[IEC104Handler] = list()
+    
+    def run(self):
+        listening_sock : socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        listening_sock.bind(('', IEC104_PORT))
+        listening_sock.settimeout(2)
+        listening_sock.listen()
+        self._device.start()
+        while not self._terminate:
+            try:
+                incoming, iaddr = listening_sock.accept()
+                incoming.settimeout(TIMEOUT_T1)
+                new_handler : IEC104Handler = IEC104Handler(device=self._device, connection=incoming)
+                self._handlers.append(new_handler)
+                new_handler.start()
+            except TimeoutError:
+                continue
+        while any(hnd.is_alive() for hnd in self._handlers):
+            for hnd in self._handlers:
+                hnd.terminate = True
+                hnd.join(1)
+        listening_sock.shutdown(SHUT_RDWR)
+        listening_sock.close()
+        self._device.join()
+
 class IEC104CLI(Cmd):
     prompt = '[IEC-104]> '
 

@@ -12,7 +12,7 @@ from typing import Callable, Optional
 from scapy.packet import Packet
 import scapy.contrib.modbus as smb
 # NEFICS imports
-from nefics.modules.devicebase import DeviceBase, ProtocolListener
+from nefics.modules.devicebase import DeviceBase, DeviceHandler, ProtocolListener
 
 MODBUS_TCP_PORT = 502
 MODBUS_MAX_LENGTH = 260
@@ -59,21 +59,12 @@ class ModbusDeviceID(Enum):
     MODEL_NAME = 0x05
     USER_APP_NAME = 0x06
 
-class ModbusHandler(Thread):
+class ModbusHandler(DeviceHandler):
 
     def __init__(self, *args, device : DeviceBase, connection : socket, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, device=device, **kwargs)
         self._device = device
         self._sock = connection
-        self._terminate = False
-    
-    @property
-    def terminate(self) -> bool:
-        return self._terminate
-    
-    @terminate.setter
-    def terminate(self, value : bool = False):
-        self._terminate = value
     
     def _mb_indication_RDCO_RDDI(self, function_code : int = 0x01, request_pdu : Optional[Packet] = None) -> Packet:
         '''Read coils request / Read Discrete Input Request'''
@@ -392,7 +383,7 @@ class ModbusListener(ProtocolListener):
     def __init__(self, *args, device : DeviceBase, **kwargs):
         super().__init__(*args, **kwargs)
         self._device : DeviceBase = device
-        self._handlers : list[ModbusHandler] = []
+        self._handlers : list[ModbusHandler] = list()
     
     def run(self):
         listening_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)

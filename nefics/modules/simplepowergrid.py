@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 
 from datetime import datetime
-from socket import socket, AF_INET, SOCK_STREAM, IPPROTO_TCP, SHUT_RDWR
 from time import sleep
 from typing import Optional
 # NEFICS imports
 from nefics.modules.devicebase import DeviceBase, DeviceHandler, LOG_PRIO
-from nefics.protos.iec10x.iec104 import IEC104Handler, IEC104_PORT, TIMEOUT_T1
+from nefics.protos.iec10x.iec104 import IEC104Listener
 from nefics.protos.simproto import NEFICSMSG, MESSAGE_ID
 
 class SimpleRTU(DeviceBase):
@@ -14,10 +13,9 @@ class SimpleRTU(DeviceBase):
 
 class RTUHandler(DeviceHandler):
 
-    def __init__(self, device: SimpleRTU):
-        super().__init__(device)
+    def __init__(self, *args, device: SimpleRTU, **kwargs):
+        super().__init__(*args, device, **kwargs)
         self._device : SimpleRTU = device
-        self._handlers : list[IEC104Handler] = list()
     
     def status(self):
         stat : str = (
@@ -29,26 +27,13 @@ class RTUHandler(DeviceHandler):
         print(stat)
 
     def run(self):
-        listening_sock : socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
-        listening_sock.bind(('', IEC104_PORT))
-        listening_sock.settimeout(2)
-        listening_sock.listen()
+        listener : IEC104Listener = IEC104Listener(device=self._device)
         self._device.start()
-        while not self._terminate:
-            try:
-                incoming, iaddr = listening_sock.accept()
-                incoming.settimeout(TIMEOUT_T1)
-                new_handler : IEC104Handler = IEC104Handler(device=self._device, connection=incoming)
-                self._handlers.append(new_handler)
-                new_handler.start()
-            except TimeoutError:
-                continue
-        while any(hnd.is_alive() for hnd in self._handlers):
-            for hnd in self._handlers:
-                hnd.terminate = True
-                hnd.join(1)
-        listening_sock.shutdown(SHUT_RDWR)
-        listening_sock.close()
+        listener.start()
+        while not self.terminate:
+            sleep(1)
+        listener.terminate = True
+        listener.join()
         self._device.join()
 
 # Source (Generator)

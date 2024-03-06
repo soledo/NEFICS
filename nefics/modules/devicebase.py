@@ -61,11 +61,11 @@ class DeviceBase(Thread):
     extract any additional values.
     '''
 
-    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
+    def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         assert all(val is not None for val in [guid, neighbors_in, neighbors_out])
         assert all(val not in neighbors_in for val in neighbors_out)
         assert all(val not in neighbors_out for val in neighbors_in)
-        super().__init__()
+        super().__init__(*args, **kwargs)
         self._guid : int = guid
         self._terminate : bool = False
         self._memory : dict[int, int] = dict()                                          # Device Memory Emulation
@@ -355,8 +355,8 @@ class DeviceBase(Thread):
 
 class DeviceHandler(Thread):
 
-    def __init__(self, device: DeviceBase):
-        super().__init__()
+    def __init__(self, *args, device: DeviceBase, **kwargs):
+        super().__init__(*args, **kwargs)
         self._device = device
         self._terminate = False
     
@@ -392,8 +392,9 @@ class DeviceHandler(Thread):
 
 class ProtocolListener(Thread):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, device : DeviceBase, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._device : DeviceBase = device
         self._terminate = False
     
     @property

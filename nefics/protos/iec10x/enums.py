@@ -499,10 +499,10 @@ CAUSE_OF_TX_FLAGS = {
 }
 
 CONTROL_FLAGS = {
-    1: 'FCV',
-    2: 'FCB',
-    4: 'PRM',
-    8: 'RES'
+    0b0001: 'FCV',
+    0b0010: 'FCB',
+    0b0100: 'PRM',
+    0b1000: 'RES'
 }
 
 SIQ_FLAGS = {

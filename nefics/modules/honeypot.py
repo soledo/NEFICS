@@ -35,8 +35,8 @@ class HoneyDevice(DeviceBase):
 
 class HoneyHandler(DeviceHandler):
     
-    def __init__(self, device: HoneyDevice):
-        super().__init__(device)
+    def __init__(self, *args, device: HoneyDevice, **kwargs):
+        super().__init__(*args, device, **kwargs)
         self._device = device
         check_honey = subprocess.call(['which', 'honeyd'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
         if check_honey != 0:
@@ -78,8 +78,8 @@ class HoneyHandler(DeviceHandler):
 
 class PLCDevice(DeviceBase):
 
-    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+    def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
+        super().__init__(*args, guid, neighbors_in, neighbors_out, **kwargs)
         assert 'phys_ip' in kwargs.keys() and isinstance(kwargs['phys_ip'], str), f'Physical process simulation IP address is missing ([phys_ip] directive not found).'
         self._html : Union[str, None] = kwargs['html'] if 'html' in kwargs.keys() and isinstance(kwargs['html'], str) else None
         self._httpsrv = kwargs['httpsrv'] if 'httpsrv' in kwargs.keys() and isinstance(kwargs['httpsrv'], str) else None
@@ -114,8 +114,8 @@ class PLCDevice(DeviceBase):
 
 class PLCHandler(DeviceHandler):
 
-    def __init__(self, device: PLCDevice):
-        super().__init__(device)
+    def __init__(self, *args, device: PLCDevice, **kwargs):
+        super().__init__(*args, device, **kwargs)
         self._device : PLCDevice = device
         self._protocols : dict[str, ProtocolListener] = dict()
 
