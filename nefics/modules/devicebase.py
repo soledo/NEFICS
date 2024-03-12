@@ -65,7 +65,6 @@ class DeviceBase(Thread):
         assert all(val is not None for val in [guid, neighbors_in, neighbors_out])
         assert all(val not in neighbors_in for val in neighbors_out)
         assert all(val not in neighbors_out for val in neighbors_in)
-        super().__init__(*args, **kwargs)
         self._guid : int = guid
         self._terminate : bool = False
         self._memory : dict[int, int] = dict()                                          # Device Memory Emulation
@@ -83,7 +82,7 @@ class DeviceBase(Thread):
         device_identification_values : list[str] = ['vname', 'pcode', 'rev', 'dname', 'model']
         if 'info' in kwargs.keys() and isinstance(kwargs['info'], dict) and all(isinstance(y, str) for x in kwargs['info'].items() for y in x) and all(str(x).lower() in device_identification_values for x in kwargs['info'].keys()):
             # Custom device identification information
-            device_info : dict[str, str] = kwargs['info']
+            device_info : dict[str, str] = kwargs.pop('info')
             self._vendor_name : str = device_info['vname']
             self._product_code : str = device_info['pcode']
             self._revision : str = device_info['rev']
@@ -97,9 +96,12 @@ class DeviceBase(Thread):
             self._device_name : str = 'eDevice'
             self._device_model : str = 'EMULATED-01'
         if 'log' in kwargs.keys() and isinstance(kwargs['log'], io.TextIOBase):         # Check for log file
-            self._logfile : Optional[io.TextIOBase] = kwargs['log']
+            self._logfile : Optional[io.TextIOBase] = kwargs.pop('log')
         else:
+            if 'log' in kwargs.keys():
+                kwargs.pop('log')
             self._logfile : Optional[io.TextIOBase] = None
+        super().__init__(*args, **kwargs)
     
     @property
     def guid(self) -> int:

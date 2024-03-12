@@ -291,12 +291,13 @@ class SWaTMemMappings(Enum):
 class PLCDevice(DeviceBase):
     
     def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         assert 'paddr' in kwargs.keys()
         assert isinstance(kwargs['paddr'], str)
         assert valid_ipv4(kwargs['paddr'])
         # Physical process pseudo-device IP address
-        self._phys_addr = (kwargs['paddr'], SIM_PORT)
+        self._phys_addr = (kwargs.pop('paddr'), SIM_PORT)
+        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
+        
 
     def __str__(self):
         output = '=' * 10 + '\r\n'
