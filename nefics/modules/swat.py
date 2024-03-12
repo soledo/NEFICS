@@ -148,16 +148,16 @@ class PhysicalStatus(object):
 class SWaTProcessDevice(DeviceBase):
 
     def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         assert SWAT_IDS[guid] == 'PHYS' # This is the physical process simulation
         assert 'plc' in kwargs.keys()
         assert isinstance(kwargs['plc'], dict)
         assert all(isinstance(x, str) for x in kwargs['plc'].keys())
         assert all(isinstance(x, str) for x in kwargs['plc'].values())
         assert all(valid_ipv4(x) for x in kwargs['plc'].values())
+        pplc:dict[str, str] = kwargs.pop('plc')
+        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         # A dictionary containing the IP addresses of the PLCs indexed by the GUID of the device. See SWAT_IDS ^^^
         self._plc_ip = dict[int, str]()
-        pplc:dict[str, str] = kwargs['plc']
         for k in pplc.keys():
             self._plc_ip[int(k)] = pplc[k]
         # Initial simulation values
@@ -347,13 +347,13 @@ class PLCHandler(DeviceHandler):
 class PLC1(PLCDevice):
 
     def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         assert guid == SWAT_IDS['PLC1']
         assert 'p3addr' in kwargs.keys()
         assert isinstance(kwargs['p3addr'], str)
         assert valid_ipv4(kwargs['p3addr'])
         assert isinstance(SWAT_IDS['PLC3'], int)
-        self._plc3_ip = kwargs['p3addr']
+        self._plc3_ip = kwargs.pop('p3addr')
+        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         # Memory mappings
         self._memory[SWaTMemMappings.MV101.value] = int(False)
         self._memory[SWaTMemMappings.P101.value] = int(True)
