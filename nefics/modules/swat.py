@@ -147,8 +147,8 @@ class PhysicalStatus(object):
 
 class SWaTProcessDevice(DeviceBase):
 
-    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+    def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
+        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         assert SWAT_IDS[guid] == 'PHYS' # This is the physical process simulation
         assert 'plc' in kwargs.keys()
         assert isinstance(kwargs['plc'], dict)
@@ -290,8 +290,8 @@ class SWaTMemMappings(Enum):
 
 class PLCDevice(DeviceBase):
     
-    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+    def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
+        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         assert 'paddr' in kwargs.keys()
         assert isinstance(kwargs['paddr'], str)
         assert valid_ipv4(kwargs['paddr'])
@@ -345,8 +345,8 @@ class PLCHandler(DeviceHandler):
 
 class PLC1(PLCDevice):
 
-    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+    def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
+        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         assert guid == SWAT_IDS['PLC1']
         assert 'p3addr' in kwargs.keys()
         assert isinstance(kwargs['p3addr'], str)
@@ -416,8 +416,8 @@ class PLC1(PLCDevice):
 
 class PLC2(PLCDevice):
 
-    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+    def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
+        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         assert guid == SWAT_IDS['PLC2']
         # Memory mappings
         self._memory[SWaTMemMappings.FIT201.value] = int(PUMP_FLOWRATE_OUT * FLOAT16_SCALE) # Float to short int
@@ -468,8 +468,8 @@ class PLC2(PLCDevice):
 
 class PLC3(PLCDevice):
 
-    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+    def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
+        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         assert guid == SWAT_IDS['PLC3']
         # Memory mappings
         self._memory[SWaTMemMappings.LIT301.value] = 5000
