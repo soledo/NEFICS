@@ -264,7 +264,7 @@ class SWaTProcessDevice(DeviceBase):
 class SWaTProcessHandler(DeviceHandler):
 
     def __init__(self, *args, device: SWaTProcessDevice, **kwargs):
-        super().__init__(*args, device, **kwargs)
+        super().__init__(*args, device=device, **kwargs)
 
     def status(self):
         stat = (
@@ -324,7 +324,7 @@ class PLCDevice(DeviceBase):
 class PLCHandler(DeviceHandler):
 
     def __init__(self, *args, device: PLCDevice, **kwargs):
-        super().__init__(*args, device, **kwargs)
+        super().__init__(*args, device=device, **kwargs)
         self._device : PLCDevice = device
         self._connections = list[Thread]()
 
