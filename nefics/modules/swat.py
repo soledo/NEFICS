@@ -403,7 +403,7 @@ class PLC1(PLCDevice):
         # Request FIT101 and LIT101 from the physical process
         self._query_values()
         # Request LIT301 value from PLC3
-        lit301 = float(self._p3.read_input_word(SWaTMemMappings.LIT301.value, unit=self._p3_id)) / FLOAT16_SCALE
+        lit301 = float(self._p3.read_input_word(SWaTMemMappings.LIT301.value & 0xFFFF, unit=self._p3_id)) / FLOAT16_SCALE
         # Control logic
         lit101 = float(self.read_word(SWaTMemMappings.LIT101.value)) / FLOAT16_SCALE # Value from short int to float
         if lit101 >= LIT_101_M['HH'] or lit101 >= LIT_101_M['H']:
