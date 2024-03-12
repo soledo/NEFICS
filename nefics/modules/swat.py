@@ -341,6 +341,9 @@ class PLCHandler(DeviceHandler):
         self._device.start()
         modbus_listener : ModbusListener = ModbusListener(device=self._device)
         modbus_listener.start()
+        while not self._terminate:
+            sleep(1)
+        modbus_listener.terminate = True
         modbus_listener.join()
         self._device.join()
 
