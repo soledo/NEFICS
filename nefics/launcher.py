@@ -57,7 +57,7 @@ def launcher_main():
         print_error(f'Could not find class "{config["device"]}" in module "nefics.modules.{config["module"]}"\r\n')
         sys.exit()
     # Instantiate the device and assert whether it is compatible (devicebase.IEDBase)
-    device = device_class(config['guid'], config['in'], config['out'], **config['parameters'])
+    device = device_class(guid=config['guid'], neighbors_in=config['in'], neighbors_out=config['out'], **config['parameters'])
     try:
         assert isinstance(device, DeviceBase), f'Instantiated device ({device_class.__name__}) is not supported by NEFICS\r\n'
     except AssertionError as e:
