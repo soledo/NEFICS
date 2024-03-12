@@ -323,7 +323,7 @@ class ModbusHandler(DeviceHandler):
     def run(self) -> None:
         isalive = True
         sock = self._sock
-        indication_handlers : dict[int, Callable] = {
+        indication_handlers : dict[int, Callable[[int, Optional[Packet]], Packet]] = {
             0x01 : self._mb_indication_RDCO_RDDI,
             0x02 : self._mb_indication_RDCO_RDDI,
             0x03 : self._mb_indication_RDHR_RDIR,

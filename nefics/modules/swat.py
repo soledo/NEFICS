@@ -7,16 +7,13 @@
 from dataclasses import dataclass, astuple
 from datetime import datetime
 from enum import Enum
-from math import ceil
 from netaddr import valid_ipv4
-from random import randint
-from scapy.contrib.modbus import * # MODBUS TCP
-from socket import AF_INET, IPPROTO_TCP, SOCK_STREAM, socket, timeout
 from threading import Thread
 from time import sleep
 from typing import Optional, Union
 # NEFICS imports
 from nefics.modules.devicebase import FLOAT16_SCALE, DeviceBase, DeviceHandler
+from nefics.protos.modbus import ModbusListener, ModbusClient
 import nefics.protos.simproto as simproto
 
 # Custom simproto definitions
@@ -114,20 +111,6 @@ PH_201_M = {
 	'L': 0.700,
 	'H': 0.800,
 	'HH': 1.000
-}
-
-MB_MAX_LEN = 260
-'''
-MODBUS PDU Size
-
-RS232 / RS485 ADU = 253 bytes + Server address (1 byte) + CRC (2 bytes) = 256 bytes
-
-TCP MODBUS ADU = 253 bytes + MBAP (7 bytes) = 260 bytes
-'''
-
-MB_WR_COIL_VAL = {
-    0x0000: False,
-    0xff00: True
 }
 
 @dataclass
@@ -291,37 +274,19 @@ class SWaTProcessHandler(DeviceHandler):
             f'{str(self._device)}'
         )
         print(stat)
-    
-class ModbusDatamap(Enum):
-    
-    DI=1
-    CO=2
-    IR=3
-    HR=4
 
-    def __str__(self):
-        STR_MAP = {1: 'Discrete Input', 2: 'Coil', 3: 'Input Register', 4: 'Holding Register'}
-        return STR_MAP[self._value_]
-
-PDU_REQ_MAPPING = {
-    ModbusDatamap.CO: ModbusPDU01ReadCoilsRequest,
-    ModbusDatamap.DI: ModbusPDU02ReadDiscreteInputsRequest,
-    ModbusDatamap.HR: ModbusPDU03ReadHoldingRegistersRequest,
-    ModbusDatamap.IR: ModbusPDU04ReadInputRegistersRequest
-}
-
-# Memory mappings for MODBUS
-PHYS_MODBUS = {
-    'MV101' : (ModbusDatamap.CO, 0x0101),
-    'P101'  : (ModbusDatamap.CO, 0x1101),
-    'P201'  : (ModbusDatamap.CO, 0x1201),
-    'P301'  : (ModbusDatamap.CO, 0x1301),
-    'LIT101': (ModbusDatamap.IR, 0x0101),
-    'LIT301': (ModbusDatamap.IR, 0x0301),
-    'FIT101': (ModbusDatamap.IR, 0x1101),
-    'FIT201': (ModbusDatamap.IR, 0x1201),
-    'PH201' : (ModbusDatamap.IR, 0x2201),
-}
+class SWaTMemMappings(Enum):
+    # Coils
+    MV101  = 0x10101
+    P101   = 0x11101
+    P201   = 0x11201
+    P301   = 0x11301
+    # Input Registers
+    LIT101 = 0x20101
+    LIT301 = 0x20301
+    FIT101 = 0x21101
+    FIT201 = 0x21201
+    PH201  = 0x22201
 
 class PLCDevice(DeviceBase):
     
@@ -332,27 +297,16 @@ class PLCDevice(DeviceBase):
         assert valid_ipv4(kwargs['paddr'])
         # Physical process pseudo-device IP address
         self._phys_addr = (kwargs['paddr'], SIM_PORT)
-        # MODBUS Device Identification
-        self._mb_vname = kwargs['vendor_name'] if 'vendor_name' in kwargs.keys() and isinstance(kwargs['vendor_name'], str) else 'NEFICS'
-        self._mb_pcode = kwargs['product_code'] if 'product_code' in kwargs.keys() and isinstance(kwargs['product_code'], str) else 'SWaT PLC'
-        self._mb_mmrev = kwargs['mm_revision'] if 'mm_revision' in kwargs.keys() and isinstance(kwargs['mm_revision'], str) else 'v1.0'
-        # MODBUS data model
-        self._di_map = dict[int, bool]()
-        self._co_map = dict[int, bool]()
-        self._ir_map = dict[int, int]()
-        self._hr_map = dict[int, int]()
 
     def __str__(self):
-        output = '=' * 40 + '\r\n'
-        for k in PHYS_MODBUS.keys():
-            dmap, addr = PHYS_MODBUS[k]
-            if self.check_addr(dmap, addr, 1):
-                value = self._get_memory_value(k)
-                output += f'{k:6s}: [{str(dmap):16s}@0x{addr:04x}] = {value}\r\n'
-        output += '=' * 40 + '\r\n'
-        return output
+        output = '=' * 10 + '\r\n'
+        for k in self._memory.keys():
+            value = self.read_bool(k) if k in range(0x20000) else self.read_word(k)
+            output += f'[@0x{k:05x}] = {value}\r\n'
+        output += '=' * 10 + '\r\n'
+        return super().__str__() + output
 
-    # Physical process I/O
+    # Physical process I/O - NEFICS
     def _request_value(self, id: int):
         assert id in PHYS_IDS.keys()
         request = NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=MESSAGE_ID['MSG_GET'], IntegerArg0=id)
@@ -365,93 +319,12 @@ class PLCDevice(DeviceBase):
         request = NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=MESSAGE_ID['MSG_SET'], IntegerArg0=id, IntegerArg1=value)
         self._sock.sendto(request.build(), self._phys_addr)
 
-    # MODBUS I/O
-    def read_bool(self, dmap: ModbusDatamap, address: int) -> bool:
-        assert dmap in [ModbusDatamap.DI, ModbusDatamap.CO]
-        data_map = self._di_map if dmap == ModbusDatamap.DI else self._co_map
-        assert address in range(65536)
-        assert address in data_map.keys()
-        return data_map[address]
     
-    def read_word(self, dmap: ModbusDatamap, address: int) -> int:
-        assert dmap in [ModbusDatamap.HR, ModbusDatamap.IR]
-        data_map = self._hr_map if dmap == ModbusDatamap.HR else self._ir_map
-        assert address in range(65536)
-        assert address in data_map.keys()
-        return data_map[address]
-    
-    def write_coil(self, address: int, value: bool):
-        assert address in range(65536)
-        assert address in self._co_map.keys()
-        self._co_map[address] = value
-
-    def write_holding_register(self, address: int, value: int):
-        assert address in range(65536)
-        assert address in self._hr_map.keys()
-        assert value in range(65536)
-        self._hr_map[address] = value
-
-    def check_addr(self, datamap: ModbusDatamap, address: int, quantity: int) -> bool:
-        try:
-            assert address in range(65535)
-            if datamap == ModbusDatamap.CO:
-                map = self._co_map
-            elif datamap == ModbusDatamap.DI:
-                map = self._di_map
-            elif datamap == ModbusDatamap.HR:
-                map = self._hr_map
-            else:
-                map = self._ir_map
-            assert all(a in map.keys() for a in range(address, address + quantity))
-            return True
-        except AssertionError:
-            return False
-
-    def _set_memory_value(self, tag:str, value: Union[int, bool]):
-        # Internal method for setting values in the memory map
-        assert tag in PHYS_MODBUS.keys()
-        datamap, address = PHYS_MODBUS[tag]
-        assert address in range(65536)
-        if datamap == ModbusDatamap.CO:
-            assert isinstance(value, bool)
-            self._co_map[address] = value
-        elif datamap == ModbusDatamap.DI:
-            assert isinstance(value, bool)
-            self._di_map[address] = value
-        elif datamap == ModbusDatamap.HR:
-            assert isinstance(value, int)
-            assert value in range(65536)
-            self._hr_map[address] = value
-        else:
-            assert isinstance(value, int)
-            assert value in range(65536)
-            self._ir_map[address] = value
-
-    def _get_memory_value(self, tag:str) -> Union[int, bool]:
-        # Internal method for getting values from the memory map
-        assert tag in PHYS_MODBUS.keys()
-        datamap, address = PHYS_MODBUS[tag]
-        assert address in range(65536)
-        if datamap == ModbusDatamap.CO:
-            return self._co_map[address]
-        elif datamap == ModbusDatamap.DI:
-            return self._di_map[address]
-        elif datamap == ModbusDatamap.HR:
-            return self._hr_map[address]
-        else:
-            return self._ir_map[address]
-
-    def _build_mb_request_single(self, tag:str) -> ModbusADURequest:
-        request = ModbusADURequest(transId=randint(1,65535))
-        dmap, address = PHYS_MODBUS[tag]
-        request /= PDU_REQ_MAPPING[dmap](startAddr=address, quantity=1)
-        return request
-
 class PLCHandler(DeviceHandler):
 
     def __init__(self, *args, device: PLCDevice, **kwargs):
         super().__init__(*args, device, **kwargs)
-        self._device = device
+        self._device : PLCDevice = device
         self._connections = list[Thread]()
 
     def status(self):
@@ -463,291 +336,12 @@ class PLCHandler(DeviceHandler):
         )
         print(stat)
 
-    def _modbus_loop(self, sock: socket):
-        connection_alive = True
-        while connection_alive and not self._terminate:
-            # MODBUS server transaction loop
-            # Based on the definitions presented in "MODBUS Messaging on TCP/IP Implementation Guide V1.0b"
-            # https://modbus.org/docs/Modbus_Messaging_Implementation_Guide_V1_0b.pdf
-            try:
-                # Wait for a MB indication
-                data = sock.recv(MB_MAX_LEN)
-                request = ModbusADURequest(data)
-                reqpdu = request.payload
-                try:
-                    # Check MBAP Header
-                    assert all(x in request.fields for x in ['transId', 'protoId', 'len', 'unitId'])
-                    assert request.protoId == 0x0000    # MODBUS
-                    assert request.unitId == 0xff       # MODBUS TCP ignores unit ID, must be 0xFF
-                except AssertionError:
-                    # Error on MBAP => MB Indication discarded
-                    continue
-                transaction_id = request.transId
-                try:
-                    # Validate the function code
-                    assert not isinstance(reqpdu, ModbusPDUUserDefinedFunctionCodeRequest)
-                except AssertionError:
-                    # Illegal function code
-                    rawpdu = bytes(reqpdu)
-                    function_code = (int(rawpdu[0]) + 0x80) & 0xff if rawpdu[0] < 0x80 else rawpdu[0] # The response function code = the request function code + 0x80
-                    # Exception Response with code 0x01
-                    response = ModbusADUResponse(transId=transaction_id)/bytes([function_code, 0x01])
-                    sock.send(response.build())
-                    continue
-                function_code = reqpdu.funcCode
-                response = ModbusADUResponse(transId=transaction_id)
-                values : list[Union[int, str]]
-                # MODBUS Indication processing
-                if function_code in [0x01, 0x02]:
-                    # Read coils request / Read Discrtete Input Request
-                    address:int = reqpdu.startAddr
-                    quantity:int = reqpdu.quantity
-                    datamap:ModbusDatamap = ModbusDatamap.CO if function_code == 0x01 else ModbusDatamap.DI
-                    if not (0x0001 <= quantity and quantity <= 0x07d0): # Validate quantity. Up to 2000 according to protocol specs
-                        # Exception Response with code 0x03
-                        response /= ModbusPDU01ReadCoilsError(exceptCode=0x03) if function_code == 0x01 else ModbusPDU02ReadDiscreteInputsError(exceptCode=0x03)
-                    elif not self._device.check_addr(datamap, address, quantity): # Validate addresses. All addresses must be mapped in the device
-                        # Exception Response with code 0x02
-                        response /= ModbusPDU01ReadCoilsError(exceptCode=0x02) if function_code == 0x01 else ModbusPDU02ReadDiscreteInputsError(exceptCode=0x02)
-                    else:
-                        # Read coil/discrete input values
-                        try:
-                            coils = 0
-                            for a in range(address + quantity - 1, address - 1, -1):
-                                coils += 1 if self._device.read_bool(datamap, a) else 0
-                                coils <<= 1
-                            status = []
-                            while coils > 0:
-                                status.append(coils & 0xff)
-                                coils >>= 8
-                            response /= ModbusPDU01ReadCoilsResponse(coilStatus=status) if function_code == 0x01 else ModbusPDU02ReadDiscreteInputsResponse(inputStatus=status)
-                        except AssertionError:
-                            # Exception Response with code 0x04
-                            response /= ModbusPDU01ReadCoilsError(exceptCode=0x04) if function_code == 0x01 else ModbusPDU02ReadDiscreteInputsError(exceptCode=0x04)
-                elif function_code in [0x03, 0x04]:
-                    # Read Holding Registers / Input Registers
-                    address:int = reqpdu.startAddr
-                    quantity:int = reqpdu.quantity
-                    datamap:ModbusDatamap = ModbusDatamap.HR if function_code == 0x03 else ModbusDatamap.IR
-                    if not (0x0001 <= quantity and quantity <= 0x7d): # Validate quantity. Up to 125 according to protocol specs
-                        # Exception Response with code 0x03
-                        response /= ModbusPDU03ReadHoldingRegistersError(exceptCode=0x03) if function_code == 0x03 else ModbusPDU04ReadInputRegistersError(exceptCode=0x03)
-                    elif not self._device.check_addr(datamap, address, quantity): # Validate addresses. All addresses must be mapped in the device
-                        # Exception Response with code 0x02
-                        response /= ModbusPDU03ReadHoldingRegistersError(exceptCode=0x02) if function_code == 0x03 else ModbusPDU04ReadInputRegistersError(exceptCode=0x02)
-                    else:
-                        try:
-                            # Read register values
-                            values = [self._device.read_word(datamap, a) for a in range(address, address + quantity, 1)]
-                            response /= ModbusPDU03ReadHoldingRegistersResponse(registerVal=values) if function_code == 0x03 else ModbusPDU04ReadInputRegistersResponse(registerVal=values)
-                        except AssertionError:
-                            # Exception Response with code 0x04
-                            response /= ModbusPDU03ReadHoldingRegistersError(exceptCode=0x04) if function_code == 0x03 else ModbusPDU04ReadInputRegistersError(exceptCode=0x04)
-                elif function_code == 0x05:
-                    # Write Single Coil Request
-                    address:int = reqpdu.outputAddr
-                    value:int = reqpdu.outputValue
-                    if value not in MB_WR_COIL_VAL.keys(): # Value is not 'ON' (0xFF00) or 'OFF' (0x0000)
-                        # Exception Response with code 0x03
-                        response /= ModbusPDU05WriteSingleCoilError(exceptCode=0x03)
-                    elif not self._device.check_addr(ModbusDatamap.CO, address, 1): # Validate address
-                        # Exception Response with code 0x02
-                        response /= ModbusPDU05WriteSingleCoilError(exceptCode=0x02)
-                    else:
-                        try:
-                            self._device.write_coil(address, MB_WR_COIL_VAL[value])
-                            response /= ModbusPDU05WriteSingleCoilResponse(outputAddr=address, outputValue=value)
-                        except AssertionError:
-                            # Exception Response with code 0x04
-                            response /= ModbusPDU05WriteSingleCoilError(exceptCode=0x04)
-                elif function_code == 0x06:
-                    # Write Single Register
-                    address:int = reqpdu.registerAddr
-                    value:int = reqpdu.registerValue
-                    if not self._device.check_addr(ModbusDatamap.HR, address, 1): # Validate address
-                        # Exception Response with code 0x02
-                        response /= ModbusPDU06WriteSingleRegisterError(exceptCode=0x02)
-                    else:
-                        try:
-                            self._device.write_holding_register(address, value)
-                            response /= ModbusPDU06WriteSingleRegisterResponse(registerAddr=address, registerValue=value)
-                        except AssertionError:
-                            # Exception Response with code 0x04
-                            response /= ModbusPDU06WriteSingleRegisterError(exceptCode=0x04)
-                elif function_code in [0x07, 0x08, 0x0b, 0x0c, 0x11]:
-                    # Serial line only - No MODBUS TCP
-                    # Exception Response with code 0x01
-                    if function_code == 0x07:
-                        response /= ModbusPDU07ReadExceptionStatusError(exceptCode=0x01)
-                    elif function_code == 0x08:
-                        response /= ModbusPDU08DiagnosticsError(exceptCode=0x01)
-                    elif function_code == 0x0b:
-                        response /= ModbusPDU0BGetCommEventCounterError(exceptCode=0x01)
-                    elif function_code == 0x0c:
-                        response /= ModbusPDU0CGetCommEventLogError(exceptCode=0x01)
-                    else:
-                        response /= ModbusPDU11ReportSlaveIdError(exceptCode=0x01)
-                elif function_code == 0x0f:
-                    # Write Multiple Coils Request
-                    address:int = reqpdu.startAddr
-                    quantity:int = reqpdu.quantityOutput
-                    count:int = reqpdu.byteCount
-                    values = reqpdu.outputsValue
-                    if not ((0x0001 <= quantity and quantity <= 0x07b0) and count == ceil(float(quantity) / 8.0)): # Validate quantity
-                        # Exception Response with code 0x03
-                        response /= ModbusPDU0FWriteMultipleCoilsError(exceptCode=0x03)
-                    elif not self._device.check_addr(ModbusDatamap.CO, address, quantity): # Validate addresses. All addresses must be mapped in the device
-                        # Exception Response with code 0x02
-                        response /= ModbusPDU0FWriteMultipleCoilsError(exceptCode=0x02)
-                    else:
-                        try:
-                            coilvals = 0
-                            assert isinstance(values, list)
-                            assert all(x.__class__ == int for x in values)
-                            while len(values):
-                                coilvals <<= 8
-                                coilvals += int(values.pop())
-                            for offset in range(quantity):
-                                self._device.write_coil(address + offset, bool(coilvals & 0b1))
-                                coilvals >>= 1
-                            response /= ModbusPDU0FWriteMultipleCoilsResponse(startAddr=address, quantityOutput=quantity)
-                        except AssertionError:
-                            # Exception Response with code 0x04
-                            response /= ModbusPDU0FWriteMultipleCoilsError(exceptCode=0x04)
-                elif function_code == 0x10:
-                    # Write Multiple Registers Request
-                    address:int = reqpdu.startAddr
-                    quantity:int = reqpdu.quantityRegisters
-                    count:int = reqpdu.byteCount
-                    values = reqpdu.outputsValue
-                    if not ((0x0001 <= quantity and quantity <= 0x007b) and count == (quantity * 2) and count == len(values)): # Validate quantity
-                        # Exception Response with code 0x03
-                        response /= ModbusPDU10WriteMultipleRegistersError(exceptCode=0x03)
-                    elif not self._device.check_addr(ModbusDatamap.HR, address, quantity): # Validate addresses. All addresses must be mapped in the device
-                        # Exception Response with code 0x02
-                        response /= ModbusPDU10WriteMultipleRegistersError(exceptCode=0x02)
-                    else:
-                        try:
-                            assert isinstance(values, list)
-                            assert all(isinstance(x, int) for x in values)
-                            for offset in range(quantity):
-                                self._device.write_holding_register(address + offset, int(values[offset]))
-                            response /= ModbusPDU10WriteMultipleRegistersResponse(startAddr=address, quantityRegisters=quantity)
-                        except AssertionError:
-                            # Exception Response with code 0x04
-                            response /= ModbusPDU10WriteMultipleRegistersError(exceptCode=0x04)
-                elif function_code in [0x014, 0x015]:
-                    # We are not supporting File Records R/W. Respond with "Busy" Exception
-                    response /= ModbusPDU14ReadFileRecordError(exceptCode=0x06) if function_code == 0x15 else ModbusPDU15WriteFileRecordError(exceptCode=0x06)
-                elif function_code == 0x16:
-                    # Mask Write Register Request
-                    address:int = reqpdu.refAddr
-                    andmask:int = reqpdu.andMask
-                    ormask:int = reqpdu.orMask
-                    if not self._device.check_addr(ModbusDatamap.HR, address, 1): # Validate Address
-                        # Exception Response with code 0x02
-                        response /= ModbusPDU16MaskWriteRegisterError(exceptCode=0x02)
-                    try:
-                        current = self._device.read_word(ModbusDatamap.HR, address)
-                        self._device.write_holding_register(address, ((current & andmask) | (ormask and (andmask ^ 0xffff))) & 0xffff)
-                        response /= ModbusPDU16MaskWriteRegisterResponse(refAddr=address, andMask=andmask, orMask=ormask)
-                    except AssertionError:
-                        # Exception Response with code 0x04
-                        response /= ModbusPDU16MaskWriteRegisterError(exceptCode=0x04)
-                elif function_code == 0x17:
-                    # Read/Write Multiple registers Request
-                    rd_address:int = reqpdu.readStartingAddr
-                    rd_quantity:int = reqpdu.readQuantityRegisters
-                    wr_address:int = reqpdu.writeStartingAddress
-                    wr_quantity:int = reqpdu.writeQuantityRegisters
-                    count:int = reqpdu.byteCount
-                    wr_values:list[int] = reqpdu.writeRegistersValue
-                    if not (0x0001 <= rd_quantity and rd_quantity <= 0x7d and 0x0001 <= wr_quantity and wr_quantity <= 0x0079 and count == (wr_quantity * 2)): # Validate quantities
-                        # Exception Response with code 0x03
-                        response /= ModbusPDU17ReadWriteMultipleRegistersError(exceptCode=0x03)
-                    elif not (self._device.check_addr(ModbusDatamap.HR, rd_address, rd_quantity) and self._device.check_addr(ModbusDatamap.HR, wr_address, wr_quantity)): # Validate addresses. All addresses must be mapped in the device
-                        # Exception Response with code 0x02
-                        response /= ModbusPDU17ReadWriteMultipleRegistersError(exceptCode=0x02)
-                    else:
-                        try:
-                            # Read register values
-                            values = [self._device.read_word(ModbusDatamap.HR, a) for a in range(rd_address, rd_address + rd_quantity, 1)]
-                            # Write register values
-                            for offset in range(wr_quantity):
-                                self._device.write_holding_register(wr_address + offset, wr_values[offset])
-                            response /= ModbusPDU17ReadWriteMultipleRegistersResponse(registerVal=values)
-                        except AssertionError:
-                            # Exception Response with code 0x04
-                            response /= ModbusPDU17ReadWriteMultipleRegistersError(exceptCode=0x04)
-                elif function_code == 0x18:
-                    # Read FIFO Queue Request
-                    fifo:int = reqpdu.FIFOPointerAddr
-                    if not self._device.check_addr(ModbusDatamap.HR, fifo, 1): # Validate FIFO pointer address
-                        # Exception Response with code 0x02
-                        response /= ModbusPDU18ReadFIFOQueueError(exceptCode=0x02)
-                    try:
-                        count = self._device.read_word(ModbusDatamap.HR, fifo)
-                        if count > 31:
-                            # Exception Response with code 0x03
-                            response /= ModbusPDU18ReadFIFOQueueError(exceptCode=0x03)
-                        elif not self._device.check_addr(ModbusDatamap.HR, fifo + 1, count): # Validate queue addresses
-                            # Exception Response with code 0x02
-                            response /= ModbusPDU18ReadFIFOQueueError(exceptCode=0x02)
-                        else:
-                            # Read queue
-                            values = [self._device.read_word(ModbusDatamap.HR, fifo + offset) for offset in range(1, count + 1)]
-                            response /= ModbusPDU18ReadFIFOQueueResponse(FIFOCount=count, FIFOVal=values)
-                    except AssertionError:
-                        # Exception Response with code 0x04
-                        response /= ModbusPDU18ReadFIFOQueueError(exceptCode=0x04)
-                else:
-                    # Read Device Identification Request
-                    readcode:int = reqpdu.readCode
-                    objectid:int = reqpdu.objectId
-                    if not (0x01 <= readcode and readcode <= 0x04):
-                        # Exception Response with code 0x03
-                        response /= ModbusPDU2B0EReadDeviceIdentificationError(exceptCode=0x03)
-                    elif readcode < 0x04:
-                        respdu = ModbusPDU2B0EReadDeviceIdentificationResponse(readCode=readcode, conformityLevel=0x83, objCount=3)
-                        respdu/= ModbusObjectId(id=0x00, value=self._device._mb_vname)
-                        respdu/= ModbusObjectId(id=0x01, value=self._device._mb_pcode)
-                        respdu/= ModbusObjectId(id=0x02, value=self._device._mb_mmrev)
-                        response /= respdu
-                    elif objectid not in [0, 1, 2]:
-                        # Object not supported
-                        # Exception Response with code 0x02
-                        response /= ModbusPDU2B0EReadDeviceIdentificationError(exceptCode=0x02)
-                    else:
-                        respdu = ModbusPDU2B0EReadDeviceIdentificationResponse(readCode=readcode, conformityLevel=0x83, objCount=1)
-                        values = [self._device._mb_vname, self._device._mb_pcode, self._device._mb_mmrev]
-                        respdu/= ModbusObjectId(id=objectid, value=values[objectid])
-                        response /= respdu
-                sock.send(response.build())
-            except (timeout, BrokenPipeError) as ex:
-                # Socket timeout or disconnection
-                connection_alive = False
-        sock.close()
-
     def run(self):
-        listening_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
-        listening_sock.bind(('', 502)) # Modbus TCP
-        listening_sock.settimeout(2) 
-        listening_sock.listen()
         self._device.start()
-        while not self._terminate:
-            try:
-                incoming, iaddr = listening_sock.accept()
-                incoming.settimeout(60) # There is no standard timeout for Modbus, we'll allow a minute
-                new_conn = Thread(target=self._modbus_loop, args=[incoming])
-                self._connections.append(new_conn)
-                new_conn.start()
-            except timeout:
-                continue
-        while any(thr.is_alive() for thr in self._connections):
-            for thr in self._connections:
-                thr.join(1)
+        modbus_listener : ModbusListener = ModbusListener(device=self._device)
+        modbus_listener.start()
+        modbus_listener.join()
         self._device.join()
-        listening_sock.close()
 
 class PLC1(PLCDevice):
 
@@ -757,16 +351,17 @@ class PLC1(PLCDevice):
         assert 'p3addr' in kwargs.keys()
         assert isinstance(kwargs['p3addr'], str)
         assert valid_ipv4(kwargs['p3addr'])
+        assert isinstance(SWAT_IDS['PLC3'], int)
         self._plc3_ip = kwargs['p3addr']
         # Memory mappings
-        self._set_memory_value('MV101', False)
-        self._set_memory_value('P101', True)
-        self._set_memory_value('LIT101', 5000) # 0.5 * 10000. The register holds 2 bytes as a short int (0-65535)
-        self._set_memory_value('FIT101', 0)
-        # PLC3 socket
-        self._p3 = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
-        self._p3.connect((self._plc3_ip, 502)) # MODBUS
-        self._p3.settimeout(1)
+        self._memory[SWaTMemMappings.MV101.value] = int(False)
+        self._memory[SWaTMemMappings.P101.value] = int(True)
+        self._memory[SWaTMemMappings.LIT101.value] = 5000 # 0.5 * 10000. The register holds 2 bytes as a short int (0-65535)
+        self._memory[SWaTMemMappings.FIT101.value] = 0
+        # PLC3 communications channel
+        self._p3_id : int = SWAT_IDS['PLC3']
+        self._p3 : ModbusClient = ModbusClient(ipaddr=self._plc3_ip)
+        self._p3.connect()
     
     def _query_values(self):
         # From physical process
@@ -782,11 +377,11 @@ class PLC1(PLCDevice):
         # To physical process
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'])
         request.IntegerArg0 = PHYS_IDS['MV101']
-        request.IntegerArg1 = int(self._get_memory_value('MV101'))
+        request.IntegerArg1 = int(self.read_bool(SWaTMemMappings.MV101.value))
         self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
         request.IntegerArg0 = PHYS_IDS['P101']
-        request.IntegerArg1 = int(self._get_memory_value('P101'))
+        request.IntegerArg1 = int(self.read_bool(SWaTMemMappings.P101.value))
         self._sock.sendto(request.build(), self._phys_addr)
     
     def handle_specific(self, message: simproto.NEFICSMSG):
@@ -794,36 +389,27 @@ class PLC1(PLCDevice):
             # PLC1 should only receive values from 'LIT101' and 'FIT101'
             phys_id = message.IntegerArg0
             value = message.FloatArg0
-            tag = PHYS_IDS[phys_id]
-            assert isinstance(phys_id, int)
-            assert isinstance(tag, str)
+            assert isinstance(phys_id, int) and phys_id in PHYS_IDS.keys()
             assert isinstance(value, float)
             if phys_id in [PHYS_IDS['LIT101'], PHYS_IDS['FIT101']]:
-                self._set_memory_value(tag, int(value * FLOAT16_SCALE)) # Float to short int
+                address = SWaTMemMappings.LIT101.value if phys_id == PHYS_IDS['LIT101'] else SWaTMemMappings.FIT101.value
+                self.write_word(address, int(value * FLOAT16_SCALE)) # Float to short int
     
     def simulate(self):
         # Request FIT101 and LIT101 from the physical process
         self._query_values()
         # Request LIT301 value from PLC3
-        request = self._build_mb_request_single('LIT301')
-        self._p3.send(request.build())
-        data = self._p3.recv(1024)
-        if len(data):
-            response = ModbusADUResponse(data)
+        lit301 = float(self._p3.read_input_word(SWaTMemMappings.LIT301.value, unit=self._p3_id)) / FLOAT16_SCALE
         # Control logic
-        lit101 = float(self._get_memory_value('LIT101')) / FLOAT16_SCALE # Value from short int to float
+        lit101 = float(self.read_word(SWaTMemMappings.LIT101.value)) / FLOAT16_SCALE # Value from short int to float
         if lit101 >= LIT_101_M['HH'] or lit101 >= LIT_101_M['H']:
-            self._set_memory_value('MV101', False)
-        if lit101 <= LIT_101_M['L'] or lit101 <= LIT_101_M['LL']:
-            self._set_memory_value('MV101', True)
-        if len(data) and 'registerVal' in response.payload.fields: # Modbus PDU response with register value (holding/input)
-            lit301 = float(response.payload.registerVal[0]) / FLOAT16_SCALE  # Value from short int to float
-            if lit301 >= LIT_301_M['HH'] or lit301 >= LIT_301_M['H']:
-                self._set_memory_value('P101', False)
-            if lit301 <= LIT_301_M['L'] or lit301 <= LIT_301_M['LL']:
-                self._set_memory_value('P101', True)
-        elif 'exceptCode' in response.payload.fields: # Modbus Exception
-            self.log('MODBUS Exception while requesing LIT301 value')
+            self.write_bool(SWaTMemMappings.MV101.value, False)
+        elif lit101 <= LIT_101_M['L'] or lit101 <= LIT_101_M['LL']:
+            self.write_bool(SWaTMemMappings.MV101.value, True)
+        if lit301 >= LIT_301_M['HH'] or lit301 >= LIT_301_M['H']:
+            self.write_bool(SWaTMemMappings.P101.value, False)
+        elif lit301 <= LIT_301_M['L'] or lit301 <= LIT_301_M['LL']:
+            self.write_bool(SWaTMemMappings.P101.value, True)
         # Commit changes to physical process
         self._update_values()
         sleep(PROCESS_TIMEOUT_S)
@@ -834,9 +420,9 @@ class PLC2(PLCDevice):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert guid == SWAT_IDS['PLC2']
         # Memory mappings
-        self._set_memory_value('FIT201', int(PUMP_FLOWRATE_OUT * FLOAT16_SCALE))  # Float to short int
-        self._set_memory_value('PH201', 7000)                               # Float to short int
-        self._set_memory_value('P201', False)
+        self._memory[SWaTMemMappings.FIT201.value] = int(PUMP_FLOWRATE_OUT * FLOAT16_SCALE) # Float to short int
+        self._memory[SWaTMemMappings.PH201.value] = 7000 # Float to short int
+        self._memory[SWaTMemMappings.P201.value] = int(False)
     
     def _query_values(self):
         # From physical process
@@ -852,7 +438,7 @@ class PLC2(PLCDevice):
         # To physical process
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'])
         request.IntegerArg0 = PHYS_IDS['P201']
-        request.IntegerArg1 = int(self._get_memory_value('P201'))
+        request.IntegerArg1 = self.read_word(SWaTMemMappings.P201.value)
         self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
     
@@ -861,22 +447,21 @@ class PLC2(PLCDevice):
             # PLC2 should only receive values from 'FIT201' and 'PH201'
             phys_id = message.IntegerArg0
             value = message.FloatArg0
-            tag = PHYS_IDS[phys_id]
             assert isinstance(phys_id, int)
             assert isinstance(value, float)
-            assert isinstance(tag, str)
             if phys_id in [PHYS_IDS['FIT201'], PHYS_IDS['PH201']]:
-                self._set_memory_value(tag, int(value * FLOAT16_SCALE)) # Float to short int
+                address = SWaTMemMappings.FIT201.value if phys_id == PHYS_IDS['FIT201'] else SWaTMemMappings.PH201.value
+                self.write_word(address, int(value * FLOAT16_SCALE)) # Float to short int
     
     def simulate(self):
         # Request FIT201 and PH201 from the physical process
         self._query_values()
         # Control logic
-        ph201 = float(self._get_memory_value('PH201')) / FLOAT16_SCALE # Value from short int to float
+        ph201 = float(self.read_word(SWaTMemMappings.PH201.value)) / FLOAT16_SCALE # Value from short int to float
         if ph201 >= PH_201_M['HH'] or ph201 >= PH_201_M['H']:
-            self._set_memory_value('P201', False)
+            self.write_bool(SWaTMemMappings.P201.value, False)
         if ph201 <= PH_201_M['LL'] or ph201 <= PH_201_M['L']:
-            self._set_memory_value('P201', True)
+            self.write_bool(SWaTMemMappings.P201.value, True)
         # Commit changes to physical process
         self._update_values()
         sleep(PROCESS_TIMEOUT_S)
@@ -887,8 +472,8 @@ class PLC3(PLCDevice):
         super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert guid == SWAT_IDS['PLC3']
         # Memory mappings
-        self._set_memory_value('LIT301', 5000)
-        self._set_memory_value('P301', False)
+        self._memory[SWaTMemMappings.LIT301.value] = 5000
+        self._memory[SWaTMemMappings.P301.value] = int(False)
     
     def _query_values(self):
         # From physical process
@@ -901,7 +486,7 @@ class PLC3(PLCDevice):
         # To physical process
         request = simproto.NEFICSMSG(SenderID=self.guid, ReceiverID=SWAT_IDS['PHYS'], MessageID=simproto.MESSAGE_ID['MSG_SET'])
         request.IntegerArg0 = PHYS_IDS['P301']
-        request.IntegerArg1 = int(self._get_memory_value('P301'))
+        request.IntegerArg1 = int(self.read_bool(SWaTMemMappings.P301.value))
         self._sock.sendto(request.build(), self._phys_addr)
         sleep(0.1)
     
@@ -911,17 +496,17 @@ class PLC3(PLCDevice):
             phys_id = message.IntegerArg0
             if phys_id == PHYS_IDS['LIT301']:
                 value = message.FloatArg0
-                self._set_memory_value('LIT301', int(value * FLOAT16_SCALE)) # Float to short int
+                self.write_word(SWaTMemMappings.LIT301.value, int(value * FLOAT16_SCALE)) # Float to short int
     
     def simulate(self):
         # Request LIT301
         self._query_values()
         # Control logic
-        lit301 = float(self._get_memory_value('LIT301')) / FLOAT16_SCALE # Value from short int to float
+        lit301 = float(self.read_word(SWaTMemMappings.LIT301.value)) / FLOAT16_SCALE # Value from short int to float
         if lit301 >= LIT_301_M['HH'] or lit301 >= LIT_301_M['H']:
-            self._set_memory_value('P301', True)
+            self.write_bool(SWaTMemMappings.P301.value, True)
         if lit301 <= LIT_301_M['LL'] or lit301 <= LIT_301_M['L']:
-            self._set_memory_value('P301', False)
+            self.write_bool(SWaTMemMappings.P301.value, False)
         # Commit changes to physical process
         self._update_values()
         sleep(PROCESS_TIMEOUT_S)
