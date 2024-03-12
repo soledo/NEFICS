@@ -381,8 +381,7 @@ class ModbusHandler(DeviceHandler):
 class ModbusListener(ProtocolListener):
 
     def __init__(self, *args, device : DeviceBase, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._device : DeviceBase = device
+        super().__init__(*args, device=device, **kwargs)
         self._handlers : list[ModbusHandler] = list()
     
     def run(self):
