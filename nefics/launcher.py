@@ -69,7 +69,7 @@ def launcher_main():
     except AttributeError:
         print_error(f'Could not find class "{config["handler"]}" in module "nefics.modules.{config["module"]}"\r\n')
         sys.exit()
-    handler = handler_class(device)
+    handler = handler_class(device=device)
     try:
         assert isinstance(handler, DeviceHandler), f'Instantiated handler ({handler.__name__}) is not supported by NEFICS\r\n'
     except AssertionError as e:
