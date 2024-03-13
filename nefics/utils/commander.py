@@ -38,22 +38,23 @@ def arpscan(hosts: list[IPv4Address]):
                 print('   [!] {0:s} is alive'.format(str(host)))
                 alive.append(str(host))
 
-def handle_rtu(sock: socket, ipaddr: str):
+def handle_rtu(ipaddr: str):
     global rtu_data
+    global rtu_comm
     global rtu_keepalive
     global rtu_thread_killswitch
     global rtu_hasbreakers
     buffer : bytes
-    sock.connect((ipaddr, IEC104_PORT))
-    sock.settimeout(10)
+    rtu_comm[ipaddr].connect((ipaddr, IEC104_PORT))
+    rtu_comm[ipaddr].settimeout(10)
     # Start data transmission
     apdu : APDU = APDU()/APCI(type=0x03, UType=0x01)
     buffer = apdu.build()
-    sock.send(buffer)
+    rtu_comm[ipaddr].send(buffer)
     rtu_keepalive[ipaddr].start()
     while not rtu_thread_killswitch[ipaddr]:
         try:
-            buffer = sock.recv(MAX_LENGTH)
+            buffer = rtu_comm[ipaddr].recv(MAX_LENGTH)
             apdu = APDU(buffer)
             assert apdu.haslayer('APCI') and apdu.haslayer('ASDU')
             apci = apdu['APCI']
@@ -160,7 +161,7 @@ def main():
             rtu_data[rtu_ip]['ioas'] = dict()
         rtu_data[rtu_ip]['tx'] = 0
         rtu_data[rtu_ip]['rx'] = 0
-        rtu_threads[rtu_ip] = Thread(target=handle_rtu, kwargs={'sock': sock, 'ipaddr': rtu_ip})
+        rtu_threads[rtu_ip] = Thread(target=handle_rtu, kwargs={'ipaddr': rtu_ip})
         rtu_keepalive[rtu_ip] = Thread(target=keep_alive, kwargs={'ipaddr': rtu_ip})
         rtu_thread_killswitch[rtu_ip] = False
         rtu_threads[rtu_ip].start()
