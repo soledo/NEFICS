@@ -14,7 +14,7 @@ class SimpleRTU(DeviceBase):
 class RTUHandler(DeviceHandler):
 
     def __init__(self, *args, device: SimpleRTU, **kwargs):
-        super().__init__(*args, device, **kwargs)
+        super().__init__(*args, device=device, **kwargs)
         self._device : SimpleRTU = device
     
     def status(self):
@@ -41,15 +41,15 @@ VOLTAGE_IOA = 0x28000     # Float read-only
 
 class Source(SimpleRTU):
 
-    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
+    def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         assert all(x is not None for x in [guid, neighbors_out])
         assert len(neighbors_out) >= 1
         assert 'voltage' in kwargs.keys()
         assert isinstance(kwargs['voltage'], float)
-        super().__init__(guid, [], neighbors_out[:1], **kwargs)
-        self._voltage : float = kwargs['voltage']
+        self._voltage : float = kwargs.pop('voltage')
+        super().__init__(*args, guid=guid, neighbors_in=[], neighbors_out=neighbors_out[:1], **kwargs)
         self._memory[VOLTAGE_IOA] = 0 # Reserve memory location
-        self.write_ieee_float(VOLTAGE_IOA, kwargs['voltage']) # write initial value
+        self.write_ieee_float(VOLTAGE_IOA, self._voltage) # write initial value
     
     def __str__(self) -> str:
         return f'Vout: {self._voltage:6.3f} V\r\n'
@@ -81,7 +81,7 @@ CURRENT_IOA = 0x28001 # Float read-only
 
 class Transmission(SimpleRTU):
 
-    def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
+    def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
         assert all(x is not None for x in [guid, neighbors_in, neighbors_out])
         assert len(neighbors_in) >= 1
         assert len(neighbors_out) >= 1
@@ -92,9 +92,9 @@ class Transmission(SimpleRTU):
         assert all(isinstance(x, float) for x in kwargs['loads'])
         assert isinstance(kwargs['state'], int)
         assert kwargs['state'] in range(2 ** len(kwargs['loads']))
-        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
-        self._loads : list[float] = kwargs['loads']
-        self._state : int = kwargs['state']
+        self._loads : list[float] = kwargs.pop('loads')
+        self._state : int = kwargs.pop('state')
+        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         for i in range(len(self._loads)):
             self._memory[BREAKER_IOA_BASE + i] = int((2 ** i) & self._state > 0)
         self._laststate : Optional[int] = None
@@ -218,14 +218,14 @@ class Transmission(SimpleRTU):
 
 class Load(SimpleRTU):
 
-    def __init__(self, guid: int, neighbors_in: list[int], neighbors_out: list[int], **kwargs):
+    def __init__(self, *args, guid: int, neighbors_in: list[int], neighbors_out: list[int], **kwargs):
         assert all(val is not None for val in [guid, neighbors_in])
         assert all(isinstance(val, int) for val in neighbors_in)
         assert len(neighbors_in) >= 1
         assert 'load' in kwargs.keys()
         assert isinstance(kwargs['load'], float)
-        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
-        self._load : Optional[float] = kwargs['load']
+        self._load : Optional[float] = kwargs.pop('load')
+        super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         self._vin : Optional[float] = None
         self._amp : Optional[float] = None
         self._memory[VOLTAGE_IN_IOA] = 0x0000
