@@ -51,6 +51,7 @@ def handle_rtu(ipaddr: str):
     apdu : APDU = APDU()/APCI(type=0x03, UType=0x01)
     buffer = apdu.build()
     rtu_comm[ipaddr].send(buffer)
+    sleep(1)
     rtu_keepalive[ipaddr].start()
     while not rtu_thread_killswitch[ipaddr]:
         try:
