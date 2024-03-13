@@ -531,7 +531,6 @@ class IEC104Listener(ProtocolListener):
         listening_sock.bind(('', IEC104_PORT))
         listening_sock.settimeout(2)
         listening_sock.listen()
-        self._device.start()
         while not self._terminate:
             try:
                 incoming, iaddr = listening_sock.accept()
@@ -547,7 +546,6 @@ class IEC104Listener(ProtocolListener):
                 hnd.join(1)
         listening_sock.shutdown(SHUT_RDWR)
         listening_sock.close()
-        self._device.join()
 
 class IEC104CLI(Cmd):
     prompt = '[IEC-104]> '
