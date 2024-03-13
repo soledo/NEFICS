@@ -84,7 +84,7 @@ class ControlledState(Enum):
 class IEC104Handler(DeviceHandler):
     
     def __init__(self, *args, device : DeviceBase, connection : socket, **kwargs):
-        super().__init__(*args, device, **kwargs)
+        super().__init__(*args, device=device, **kwargs)
         self._sock : socket = connection
         self._state : ControlledState = ControlledState.STOPPED
         self._tx : int = 0
