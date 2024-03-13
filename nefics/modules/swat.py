@@ -131,7 +131,7 @@ class PhysicalStatus(object):
 
     def __str__(self):
         output = (
-            f'{"=" * 15}\r\n'
+            f'{"=" * 20}\r\n'
             f' MV101: {"   [ON]" if self.mv101  else "  [OFF]"}\r\n'
             f'  P101: {"   [ON]" if self.p101   else "  [OFF]"}\r\n'
             f'  P201: {"   [ON]" if self.p201   else "  [OFF]"}\r\n'
@@ -141,7 +141,7 @@ class PhysicalStatus(object):
             f'FIT101: {self.fit101:2.7f}\r\n'
             f'FIT201: {self.fit201:2.7f}\r\n'
             f' PH201: {self.ph201:2.7f}\r\n'
-            f'{"=" * 15}\r\n'
+            f'{"=" * 20}\r\n'
         )
         return output
 
@@ -299,13 +299,24 @@ class PLCDevice(DeviceBase):
         super().__init__(*args, guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
         
 
-    def __str__(self):
-        output = '=' * 10 + '\r\n'
+    def __str__(self) -> str:
+        output : str = (
+            f'    ### Emulated PLC Device\r\n'
+            f'     ## Module: {self.__class__.__module__}\r\n'
+            f'     ## Class:  {self.__class__.__name__}\r\n'
+            f'      # Configured device information:\r\n\r\n'
+            f'        Vendor name:  {self._vendor_name}\r\n'
+            f'        Product code: {self._product_code}\r\n'
+            f'        Revision:     {self._revision}\r\n'
+            f'        Device name:  {self._device_name}\r\n'
+            f'        Device model: {self._device_model}\r\n\r\n'
+            f'{"=" * 20}\r\n'
+        )
         for k in self._memory.keys():
             value = self.read_bool(k) if k in range(0x20000) else self.read_word(k)
             output += f'[@0x{k:05x}] = {value}\r\n'
-        output += '=' * 10 + '\r\n'
-        return super().__str__() + output
+        output += f'{"=" * 20}\r\n'
+        return output
 
     # Physical process I/O - NEFICS
     def _request_value(self, id: int):
