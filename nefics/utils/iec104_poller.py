@@ -9,7 +9,6 @@ from types import FrameType
 from typing import Optional
 
 # NEFICS imports
-from nefics.protos.iec10x.enums import DPI_ENUM
 from nefics.protos.iec10x.packets import APDU, APCI
 from nefics.protos.iec10x.iec104 import IEC104_PORT, TIMEOUT_T1, TIMEOUT_T2
 

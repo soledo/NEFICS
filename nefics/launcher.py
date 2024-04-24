@@ -9,6 +9,9 @@ from nefics.modules.devicebase import DeviceBase, DeviceHandler
 from run import print_error
 
 def launcher_main():
+    '''
+    Launch a simulated NEFICS device. The device's configuration can be passed on as a JSON string (-C) or JSON file (-c) via command line arguments.
+    '''
     from importlib import import_module
     import io
     import argparse
@@ -75,6 +78,7 @@ def launcher_main():
     except AssertionError as e:
         print_error(str(e))
         sys.exit()
+    # Bind termination signals to appropriate method
     signal.signal(signal.SIGINT, handler.set_terminate)
     signal.signal(signal.SIGTERM, handler.set_terminate)
 
@@ -86,14 +90,19 @@ def launcher_main():
     
     if os.name == 'posix':
         os.system('stty -echo')
+    # Begin process
     handler.start()
     while not handler.terminate:
+        # Wait for termination (Ctrl+C or Signal)
         clearscreen()
         handler.status()
         sleep(1)
+    # Wait for underlying processes
     handler.join()
     if os.name == 'posix':
         os.system('stty echo')
+    
+    # Done!
     
 if __name__ == '__main__':
     launcher_main()
