@@ -106,4 +106,4 @@ The configuration file is in JSON format and specifies the network topology of t
 ```
 
 ## Acknowledgments
-This research was possible thanks to the federal grants NIST 70NANB17H282 and DHS/AFRL FA8750-19-2-0010.
+This research was possible thanks to the federal grants NIST 70NANB17H282, DHS/AFRL FA8750-19-2-0010, and NSF awards 1931573 and 1929410.
