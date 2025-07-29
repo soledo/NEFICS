@@ -24,10 +24,10 @@ class HoneyDevice(DeviceBase):
     # Will only hold the honeyd configuration
     
     def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
         assert 'honeyconf' in kwargs.keys()
         assert os.path.exists(kwargs['honeyconf'])
-        self._honeyconf = kwargs['honeyconf']
+        self._honeyconf = kwargs.pop('honeyconf')
+        super().__init__(guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
     
     @property
     def honeyconf(self) -> str:
@@ -36,7 +36,7 @@ class HoneyDevice(DeviceBase):
 class HoneyHandler(DeviceHandler):
     
     def __init__(self, *args, device: HoneyDevice, **kwargs):
-        super().__init__(*args, device, **kwargs)
+        super().__init__(*args, device=device, **kwargs)
         self._device = device
         check_honey = subprocess.call(['which', 'honeyd'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
         if check_honey != 0:
@@ -47,8 +47,12 @@ class HoneyHandler(DeviceHandler):
         if isinstance(self._process, subprocess.Popen):
             self._process.kill()
             self._process = None
+        fingerprint_file = 'conf/honeypot_fingerprints.txt'
+        cmd = ['honeyd', '-d', '-i', 'honeypot-eth0', '-f', self._device.honeyconf]
+        if os.path.exists(fingerprint_file):
+            cmd.extend(['-p', fingerprint_file])
         self._process = subprocess.Popen(
-            ['honeyd', '-d', '-i', 'honeypot-eth0', '-f', self._device.honeyconf],
+            cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
@@ -79,12 +83,16 @@ class HoneyHandler(DeviceHandler):
 class PLCDevice(DeviceBase):
 
     def __init__(self, *args, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(*args, guid, neighbors_in, neighbors_out, **kwargs)
+        # Extract PLC-specific parameters before calling super().__init__
         assert 'phys_ip' in kwargs.keys() and isinstance(kwargs['phys_ip'], str), f'Physical process simulation IP address is missing ([phys_ip] directive not found).'
-        self._html : Union[str, None] = kwargs['html'] if 'html' in kwargs.keys() and isinstance(kwargs['html'], str) else None
-        self._httpsrv = kwargs['httpsrv'] if 'httpsrv' in kwargs.keys() and isinstance(kwargs['httpsrv'], str) else None
-        self._protocols : Union[list[str], None] = kwargs['protos'] if 'protos' in kwargs.keys() and isinstance(kwargs['protos'], list) and all(isinstance(x, str) for x in kwargs['protos']) else None
-        self._phys_ip = kwargs['phys_ip']
+        self._html : Union[str, None] = kwargs.pop('html', None) if 'html' in kwargs else None
+        self._httpsrv = kwargs.pop('httpsrv', None) if 'httpsrv' in kwargs else None
+        self._protocols : Union[list[str], None] = kwargs.pop('protos', None) if 'protos' in kwargs else None
+        self._phys_ip = kwargs.pop('phys_ip')
+        # Remove other PLC-specific parameters that shouldn't go to DeviceBase
+        for key in ['info']:
+            kwargs.pop(key, None)
+        super().__init__(guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
     
     @property
     def httpsrv_header(self) -> str:
@@ -115,7 +123,7 @@ class PLCDevice(DeviceBase):
 class PLCHandler(DeviceHandler):
 
     def __init__(self, *args, device: PLCDevice, **kwargs):
-        super().__init__(*args, device, **kwargs)
+        super().__init__(device=device, **kwargs)
         self._device : PLCDevice = device
         self._protocols : dict[str, ProtocolListener] = dict()
 
@@ -189,12 +197,16 @@ class WaterTankPhysMemMapping(Enum):
 class WaterTankPLC(PLCDevice):
 
     def __init__(self, guid: int, neighbors_in: list[int] = list(), neighbors_out: list[int] = list(), **kwargs):
-        super().__init__(guid, neighbors_in, neighbors_out, **kwargs)
+        # Extract WaterTank-specific parameters
         assert 'set_point' in kwargs.keys() and isinstance(kwargs['set_point'], float), f'Missing set point ([set_point] directive not found)'
         assert kwargs['set_point'] > 0.0 and kwargs['set_point'] < 3.0, f'Set point out of range'
-        set_point : int = int((1000.0 * kwargs['set_point']) / 3.0) # Set point (HR) [0-1000] <-> [0-3m]
+        set_point_value = kwargs.pop('set_point')
+        # Extract slave_id (default to 1 for backward compatibility)
+        self._slave_id = kwargs.pop('slave_id', 1)
+        super().__init__(guid=guid, neighbors_in=neighbors_in, neighbors_out=neighbors_out, **kwargs)
+        set_point : int = int((1000.0 * set_point_value) / 3.0) # Set point (HR) [0-1000] <-> [0-3m]
         self._memory[WaterTankPLCMemMapping.TANK_LVL.value] = 0 # Water level meter (IR) [0-1000] <-> [0-3m]
-        self._memory[WaterTankPLCMemMapping.SET_POINT.value] =  set_point & 0xff
+        self._memory[WaterTankPLCMemMapping.SET_POINT.value] = set_point  # Remove & 0xff to store full value
         self._memory[WaterTankPLCMemMapping.VALVE_IN.value] = 0 # Valve in (HR) [0-1000] <-> [0-100%]
         self._memory[WaterTankPLCMemMapping.VALVE_OUT.value] = 0 # Valve out (HR) [0-1000] <-> [0-100%]
         
@@ -217,10 +229,10 @@ class WaterTankPLC(PLCDevice):
         phys.connect()
         while not self._terminate:
             try:
-                lvl = phys.read_input_word(WaterTankPhysMemMapping.TANK_LVL.value, unit=1)
+                lvl = phys.read_input_word(WaterTankPhysMemMapping.TANK_LVL.value, unit=self._slave_id)
                 self._write_word(WaterTankPLCMemMapping.TANK_LVL.value, lvl)
-                phys.send_word(WaterTankPhysMemMapping.VALVE_IN.value, self.read_word(WaterTankPLCMemMapping.VALVE_IN.value), unit=1)
-                phys.send_word(WaterTankPhysMemMapping.VALVE_OUT.value, self.read_word(WaterTankPLCMemMapping.VALVE_OUT.value), unit=1)
+                phys.send_word(WaterTankPhysMemMapping.VALVE_IN.value, self.read_word(WaterTankPLCMemMapping.VALVE_IN.value), unit=self._slave_id)
+                phys.send_word(WaterTankPhysMemMapping.VALVE_OUT.value, self.read_word(WaterTankPLCMemMapping.VALVE_OUT.value), unit=self._slave_id)
             except BrokenPipeError:
                 phys.reconnect()
             sleep(SYNC_TIMER)

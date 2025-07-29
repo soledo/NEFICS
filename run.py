@@ -320,13 +320,27 @@ def nefics(conf: dict):
                 device.cmd(f'ip route add {rt[0]} via {rt[1]}')
         if 'launcher' in dev.keys():
             # Launch a sandbox process in a new terminal in the device
-            net.terms += makeTerm(devices[dev['name']], cmd=f"python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\'")
+            if 'DISPLAY' in os.environ:
+                try:
+                    net.terms += makeTerm(devices[dev['name']], cmd=f"cd {os.getcwd()} && python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\'; bash")
+                except Exception as e:
+                    print(f"Failed to create xterm for {dev['name']}: {e}")
+                    print(f"Falling back to background mode for {dev['name']}...")
+                    devices[dev['name']].cmd(f"cd {os.getcwd()} && python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\' &")
+            else:
+                # If no DISPLAY, run launcher in background
+                print(f"Starting launcher for {dev['name']} in background (no DISPLAY)...")
+                devices[dev['name']].cmd(f"cd {os.getcwd()} && python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\' &")
             sleep(0.5)
     # Local terminal (Mininet host)
-    localxterm = Popen(['xterm', '-display', os.environ['DISPLAY']], stdout=PIPE, stdin=PIPE)
+    if 'DISPLAY' in os.environ:
+        localxterm = Popen(['xterm', '-display', os.environ['DISPLAY']], stdout=PIPE, stdin=PIPE)
+    else:
+        localxterm = None
     CLI(net)
-    localxterm.kill()
-    localxterm.wait()
+    if localxterm is not None:
+        localxterm.kill()
+        localxterm.wait()
     if 'localiface' in conf.keys():
         switches[conf['localiface']['switch']].detach(conf['localiface']['iface'])
     net.stop()
