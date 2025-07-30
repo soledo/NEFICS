@@ -242,19 +242,34 @@ class WaterTankPLC(PLCDevice):
         sync_thread = Thread(target=self.sync)
         sync_thread.start()
         t_s : float = 0.1 # Sample time
-        e_i : float = 0.0 # Error
-        h_0 : float = 1.5 # Linearization point
+        e_i : float = 0.0 # Integral error
         while not self._terminate:
-            # Simple LQI controller using a set point
+            # PI controller with proper valve logic
             ref : float = (self.read_word(WaterTankPLCMemMapping.SET_POINT.value) * 3.0) / 1000.0
             lvl = self.read_word(WaterTankPLCMemMapping.TANK_LVL.value)
             lvl = (lvl * 3.0) / 1000.0
-            e_i = e_i + (ref - lvl) * t_s
-            e_i = max(-15, e_i) if e_i < 15 else 15
-            v_in : int = int( (-0.79 * (lvl - h_0) + 0.07 * e_i + 0.5) * 1000)
-            v_out : int = int( (0.79 * (lvl - h_0) -0.07 * e_i + 0.5) * 1000)
-            v_in = max(0, v_in) if v_in < 1000 else 1000
-            v_out = max(0, v_out) if v_out < 1000 else 1000
+            
+            # Calculate error
+            error = ref - lvl
+            e_i = e_i + error * t_s
+            e_i = max(-5.0, min(5.0, e_i))  # Limit integral windup
+            
+            # PI controller output
+            Kp = 300.0  # Proportional gain
+            Ki = 50.0   # Integral gain
+            output = Kp * error + Ki * e_i
+            
+            # Convert to valve positions with proper logic
+            if output > 10:  # Need more water
+                v_in = min(1000, int(abs(output)))
+                v_out = 0
+            elif output < -10:  # Need less water
+                v_in = 0
+                v_out = min(1000, int(abs(output)))
+            else:  # Near setpoint - moderate both valves
+                v_in = max(0, min(500, int(250 + output * 10)))
+                v_out = max(0, min(500, int(250 - output * 10)))
+            
             self._write_word(WaterTankPLCMemMapping.VALVE_IN.value, v_in)
             self._write_word(WaterTankPLCMemMapping.VALVE_OUT.value, v_out)
             sleep(t_s)
