@@ -319,24 +319,20 @@ def nefics(conf: dict):
             if isinstance(rt, list) and len(rt) == 2 and all(isinstance(r, str) for r in rt):
                 device.cmd(f'ip route add {rt[0]} via {rt[1]}')
         if 'launcher' in dev.keys():
-            # Launch a sandbox process in a new terminal in the device
-            if 'DISPLAY' in os.environ:
-                try:
-                    net.terms += makeTerm(devices[dev['name']], cmd=f"cd {os.getcwd()} && python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\'; bash")
-                except Exception as e:
-                    print(f"Failed to create xterm for {dev['name']}: {e}")
-                    print(f"Falling back to background mode for {dev['name']}...")
-                    devices[dev['name']].cmd(f"cd {os.getcwd()} && python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\' &")
-            else:
-                # If no DISPLAY, run launcher in background
-                print(f"Starting launcher for {dev['name']} in background (no DISPLAY)...")
-                devices[dev['name']].cmd(f"cd {os.getcwd()} && python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\' &")
-            sleep(0.5)
+            # Always run launcher in background mode for reliability
+            print(f"Starting launcher for {dev['name']} in background...")
+            devices[dev['name']].cmd(f"cd {os.getcwd()} && python3 -m nefics.launcher -C \'{json.dumps(dev['launcher'])}\' &")
+            sleep(2.0)  # Increased wait time for services to start
     # Local terminal (Mininet host)
     if 'DISPLAY' in os.environ:
         localxterm = Popen(['xterm', '-display', os.environ['DISPLAY']], stdout=PIPE, stdin=PIPE)
     else:
         localxterm = None
+    
+    # Wait for services to fully start before CLI
+    print("Waiting for services to start...")
+    sleep(5.0)
+    print("Services should be ready. Starting CLI...")
     CLI(net)
     if localxterm is not None:
         localxterm.kill()
