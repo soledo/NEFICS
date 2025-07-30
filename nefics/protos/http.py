@@ -44,8 +44,9 @@ class HTTPHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         path = self.translate_path(self.path)
         if os.path.isdir(path):
-            if os.path.exists(f'{path}index.html'):
-                path += 'index.html'
+            index_path = os.path.join(path, 'index.html')
+            if os.path.exists(index_path):
+                path = index_path
             else:
                 self.send_error(404, "Not found")
                 return
